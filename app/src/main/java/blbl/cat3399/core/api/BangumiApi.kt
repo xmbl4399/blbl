@@ -5,6 +5,7 @@ import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.BangumiCalendarDay
 import blbl.cat3399.core.model.BangumiCalendarItem
 import blbl.cat3399.core.net.await
+import blbl.cat3399.core.prefs.AppPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -33,6 +34,7 @@ object BangumiApi {
     private const val TAGS_CACHE_FILE = "browse_tags.json"
 
     private lateinit var cacheDir: File
+    private lateinit var prefs: AppPrefs
 
     /** 常见番剧分类白名单:命中即作为卡片流派标签(取前 2 个) */
     private val TAG_WHITELIST =
@@ -88,8 +90,12 @@ object BangumiApi {
     }
 
     fun init(context: Context) {
+        prefs = AppPrefs(context.applicationContext)
         cacheDir = File(context.cacheDir, "bangumi").apply { mkdirs() }
     }
+
+    /** 是否已配置 access token(匿名访问也能用,但 NSFW 条目仅 token 可见) */
+    fun hasAccessToken(): Boolean = prefs.bangumiAccessToken.isNotEmpty()
 
     /**
      * 星期视图:GET /calendar。
@@ -132,23 +138,39 @@ object BangumiApi {
         return withContext(Dispatchers.Default) { parseBrowse(raw) }
     }
 
-    /** 当季 browse 分页拉全(约 3 页),收集 id -> 白名单 tags,12h 缓存 */
+    /**
+     * 历史季度全量:分页拉完整个季度(API limit 上限 100,按 total 翻页)。
+     * 带 access token 时可多拿到 NSFW/未公开条目(实测 2026 夏:匿名 250 → token 263)。
+     */
+    suspend fun browseAll(year: Int, season: String): List<BangumiCalendarItem> {
+        val out = ArrayList<BangumiCalendarItem>()
+        var offset = 0
+        while (true) {
+            val page = browse(year, season, offset = offset)
+            if (page.isEmpty()) break
+            out.addAll(page)
+            if (page.size < 100) break
+            offset += 100
+            if (offset > 500) break // 防死循环
+        }
+        return out
+    }
+
+    /** 当季 browse 分页拉全,收集 id -> 白名单 tags,12h 缓存(匿名/带 token 分开缓存) */
     private suspend fun browseTagsForCurrentSeason(): Map<Long, List<String>> {
-        val cached = readCache(TAGS_CACHE_FILE)
-        if (cached != null && cacheAgeMs(TAGS_CACHE_FILE) < CALENDAR_CACHE_AGE_MS) {
+        val cacheName = if (prefs.bangumiAccessToken.isEmpty()) TAGS_CACHE_FILE else "${TAGS_CACHE_FILE}.auth"
+        val cached = readCache(cacheName)
+        if (cached != null && cacheAgeMs(cacheName) < CALENDAR_CACHE_AGE_MS) {
             return parseTagMap(cached)
         }
         val spec = SeasonSpec.current()
         val map = HashMap<Long, List<String>>(320)
-        for (offset in 0..200 step 100) {
-            try {
-                browse(spec.year, spec.season, offset = offset).forEach { map[it.id] = it.tags }
-            } catch (t: Throwable) {
-                AppLog.w(TAG, "browse tags page offset=$offset failed", t)
-                break
-            }
+        try {
+            browseAll(spec.year, spec.season).forEach { map[it.id] = it.tags }
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "browse tags failed", t)
         }
-        writeCache(TAGS_CACHE_FILE, serializeTagMap(map))
+        writeCache(cacheName, serializeTagMap(map))
         return map
     }
 
@@ -189,13 +211,16 @@ object BangumiApi {
     }
 
     private suspend fun fetch(url: String): String {
-        val req =
+        val reqBuilder =
             Request.Builder()
                 .url(url)
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "application/json")
-                .build()
-        return client.newCall(req).await().use { r ->
+        // access token 可选;配置后可见 NSFW/未公开条目(OptionalHTTPBearer)
+        if (::prefs.isInitialized && prefs.bangumiAccessToken.isNotEmpty()) {
+            reqBuilder.header("Authorization", "Bearer ${prefs.bangumiAccessToken}")
+        }
+        return client.newCall(reqBuilder.build()).await().use { r ->
             if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code} ${r.message}")
             r.body?.string().orEmpty()
         }

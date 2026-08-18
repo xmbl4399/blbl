@@ -731,6 +731,7 @@ class SettingsInteractionHandler(
             }
 
             SettingId.UserAgent -> showUserAgentDialog(state.currentSectionIndex, entry.id)
+            SettingId.BangumiAccessToken -> showBangumiAccessTokenDialog(state.currentSectionIndex, entry.id)
             SettingId.Ipv4OnlyEnabled -> {
                 prefs.ipv4OnlyEnabled = !prefs.ipv4OnlyEnabled
                 AppToast.show(activity, "是否只允许使用IPV4：${if (prefs.ipv4OnlyEnabled) "开" else "关"}")
@@ -2520,6 +2521,31 @@ class SettingsInteractionHandler(
             onNeutral = {
                 prefs.userAgent = blbl.cat3399.core.prefs.AppPrefs.DEFAULT_UA
                 AppToast.show(activity, "已重置 User-Agent")
+                renderer.showSection(sectionIndex, focusId = focusId)
+            },
+        )
+    }
+
+    private fun showBangumiAccessTokenDialog(sectionIndex: Int, focusId: SettingId) {
+        val prefs = BiliClient.prefs
+        AppPopup.input(
+            context = activity,
+            title = "Bangumi Token",
+            initial = prefs.bangumiAccessToken,
+            hint = "在 bgm.tv/dev/app 创建 access token,留空即匿名访问",
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            minLines = 1,
+            positiveText = "保存",
+            negativeText = "取消",
+            neutralText = "清空",
+            onPositive = { text ->
+                prefs.bangumiAccessToken = text.trim()
+                AppToast.show(activity, if (text.isBlank()) "已清空 Bangumi Token" else "已保存 Bangumi Token")
+                renderer.showSection(sectionIndex, focusId = focusId)
+            },
+            onNeutral = {
+                prefs.bangumiAccessToken = ""
+                AppToast.show(activity, "已清空 Bangumi Token")
                 renderer.showSection(sectionIndex, focusId = focusId)
             },
         )

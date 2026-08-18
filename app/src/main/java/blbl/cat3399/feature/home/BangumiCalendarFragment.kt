@@ -226,8 +226,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                         // 当季:星期视图(calendar + browse 合并 tags)
                         BangumiApi.calendarWithTags()
                     } else {
-                        // 历史季度:按热度列表,单 header 标题
-                        val items = BangumiApi.browse(spec.year, spec.season)
+                        // 历史季度:分页拉全,按热度列表,单 header 标题
+                        val items = BangumiApi.browseAll(spec.year, spec.season)
                         listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = items))
                     }
                 if (token != requestToken) return@launch
