@@ -18,6 +18,7 @@ object HomeTabs {
     const val KEY_POPULAR = "popular"
     const val KEY_BANGUMI = "bangumi"
     const val KEY_CINEMA = "cinema"
+    const val KEY_BANGUMI_CALENDAR = "bangumi_calendar"
 
     val all: List<HomeTabSpec> =
         listOf(
@@ -25,6 +26,7 @@ object HomeTabs {
             HomeTabSpec(KEY_POPULAR, R.string.tab_popular) { VideoGridFragment.newPopular() },
             HomeTabSpec(KEY_BANGUMI, R.string.tab_bangumi) { PgcRecommendGridFragment.newBangumi() },
             HomeTabSpec(KEY_CINEMA, R.string.tab_cinema) { PgcRecommendGridFragment.newCinema() },
+            HomeTabSpec(KEY_BANGUMI_CALENDAR, R.string.tab_bangumi_calendar) { BangumiCalendarFragment.newInstance() },
         )
 
     fun visibleTabs(prefs: AppPrefs): List<HomeTabSpec> = filterVisible(all, prefs.mainHomeVisibleTabs)
