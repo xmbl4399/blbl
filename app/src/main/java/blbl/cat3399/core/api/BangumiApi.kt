@@ -103,6 +103,13 @@ object BangumiApi {
                 }
                 return out
             }
+
+            /** 从 [startYear] 冬 到当前季的季度总数(用于生成"全部季度"列表) */
+            fun quarterCountSince(startYear: Int): Int {
+                val cur = current()
+                val idx = (cur.year - startYear) * 4 + (cur.month - 1) / 3
+                return (idx + 1).coerceAtLeast(1)
+            }
         }
     }
 
@@ -263,8 +270,10 @@ object BangumiApi {
 
     private fun parseItem(it: JSONObject): BangumiCalendarItem {
         val images = it.optJSONObject("images")
+        // 封面优先 common(400px,约 100-200KB);medium 是 800px 原图(300-500KB)加载慢
         val cover =
-            images?.optString("medium").orEmpty().takeIf { c -> c.isNotBlank() }
+            images?.optString("common").orEmpty().takeIf { c -> c.isNotBlank() }
+                ?: images?.optString("medium").orEmpty().takeIf { c -> c.isNotBlank() }
                 ?: images?.optString("large").orEmpty().takeIf { c -> c.isNotBlank() }
         val rating = it.optJSONObject("rating")
         val scoreRaw = rating?.optDouble("score", Double.NaN)

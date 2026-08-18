@@ -90,7 +90,7 @@ class BangumiCalendarAdapter(
 
     class HeaderVh(private val binding: ItemBangumiCalendarHeaderBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(day: BangumiCalendarDay) {
-            binding.tvWeekday.text = day.weekdayCn
+            // 只显示统计信息(季度名已移除):"68 部 · 放送 07-04 起"
             val meta = buildList {
                 add("${day.items.size} 部")
                 day.items.firstOrNull()?.airDate?.takeIf { it.length >= 10 }?.let { add("放送 ${it.substring(5)} 起") }

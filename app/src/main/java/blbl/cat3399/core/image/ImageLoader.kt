@@ -1,5 +1,6 @@
 package blbl.cat3399.core.image
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.ColorDrawable
@@ -8,14 +9,20 @@ import androidx.collection.LruCache
 import blbl.cat3399.R
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.net.await
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.security.MessageDigest
 import java.util.WeakHashMap
+import java.util.concurrent.TimeUnit
 
 object ImageLoader {
     private const val TAG = "ImageLoader"
@@ -25,6 +32,20 @@ object ImageLoader {
 
     private val cache = object : LruCache<String, Bitmap>(maxCacheBytes()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+
+    private lateinit var diskCacheDir: File
+
+    // 非 B站 CDN(如 lain.bgm.tv)走独立客户端,不带 B站 UA/Referer/Origin(避免 CDN 策略干扰)
+    private val plainOkHttp by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
+
+    fun init(context: Context) {
+        diskCacheDir = File(context.cacheDir, "images").apply { mkdirs() }
     }
 
     fun loadInto(view: ImageView, url: String?) {
@@ -63,7 +84,10 @@ object ImageLoader {
         if (view.drawable !== placeholder) view.setImageDrawable(placeholder)
         val job = scope.launch {
             try {
-                val bytes = withContext(Dispatchers.IO) { BiliClient.getBytes(normalized) }
+                val bytes =
+                    withContext(Dispatchers.IO) {
+                        loadBytesWithDiskCache(normalized)
+                    }
                 val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
                 if (bmp != null) {
                     cache.put(normalized, bmp)
@@ -76,6 +100,51 @@ object ImageLoader {
             }
         }
         inFlight[view] = job
+    }
+
+    /** 磁盘缓存优先:命中直接读文件,否则网络下载并写盘 */
+    private suspend fun loadBytesWithDiskCache(url: String): ByteArray {
+        if (::diskCacheDir.isInitialized) {
+            val disk = diskPath(url)
+            if (disk.exists()) {
+                val cached = runCatching { disk.readBytes() }.getOrNull()
+                if (cached != null && cached.isNotEmpty()) return cached
+            }
+            val bytes = fetchBytes(url)
+            runCatching { disk.writeBytes(bytes) }
+                .onFailure { AppLog.w(TAG, "disk cache write failed", it) }
+            return bytes
+        }
+        return fetchBytes(url)
+    }
+
+    private suspend fun fetchBytes(url: String): ByteArray {
+        val host = url.toHttpUrlOrNull()?.host?.lowercase().orEmpty()
+        val isBili =
+            host == "hdslb.com" ||
+                host.endsWith(".hdslb.com") ||
+                host == "bilibili.com" ||
+                host.endsWith(".bilibili.com") ||
+                host == "bilivideo.com" ||
+                host.endsWith(".bilivideo.com") ||
+                host == "bilivideo.cn" ||
+                host.endsWith(".bilivideo.cn")
+        return if (isBili) {
+            BiliClient.getBytes(url)
+        } else {
+            plainOkHttp.newCall(Request.Builder().url(url).build()).await().use { r ->
+                val bytes = r.body?.bytes() ?: ByteArray(0)
+                if (bytes.isEmpty() && !r.isSuccessful) throw java.io.IOException("HTTP ${r.code} ${r.message}")
+                bytes
+            }
+        }
+    }
+
+    private fun diskPath(url: String): File = File(diskCacheDir, md5(url) + ".img")
+
+    private fun md5(input: String): String {
+        val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     private fun normalizeImageUrl(url: String?): String? {

@@ -137,9 +137,12 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     // D-pad:方向键在季度间移动焦点(不切换),按 OK/确认键才加载所选季度;
     // 鼠标/触控点击 tab 直接切换。
 
-    private fun setupSeasonBar() {
-        val quarters = BangumiApi.SeasonSpec.recentQuarters(QUARTER_COUNT)
+    // 全部季度:2000 冬 至当前季(TabLayout scrollable 全量 view,约 107 个,开销可忽略)
+    private val quarters: List<BangumiApi.SeasonSpec> by lazy {
+        BangumiApi.SeasonSpec.recentQuarters(BangumiApi.SeasonSpec.quarterCountSince(QUARTER_START_YEAR))
+    }
 
+    private fun setupSeasonBar() {
         binding.tabQuarter.addOnTabSelectedListener(
             object : TabLayout.OnTabSelectedListener {
                 override fun onTabSelected(tab: TabLayout.Tab) {
@@ -240,6 +243,10 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
             pendingFocusFirstCardAfterRefresh = true
             clearPendingFocusFlags()
             dpadGridController?.parkFocusForDataSetReset()
+        }
+        // 切换季度/首次加载也显示加载动画(SwipeRefresh 转圈)
+        if (isResumed && _binding != null && !_binding!!.swipeRefresh.isRefreshing) {
+            _binding!!.swipeRefresh.isRefreshing = true
         }
         adapter.submit(emptyList())
         loadSeason(isRefresh = true)
@@ -514,7 +521,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     }
 
     companion object {
-        private const val QUARTER_COUNT = 24
+        // 季度起点:2006 冬(用户确认,更早的季度意义不大)
+        private const val QUARTER_START_YEAR = 2006
 
         fun newInstance(): BangumiCalendarFragment = BangumiCalendarFragment()
     }
