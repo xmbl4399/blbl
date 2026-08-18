@@ -231,7 +231,7 @@ class AppPrefs(context: Context) {
         set(value) = prefs.edit().putFloat(KEY_DANMAKU_OPACITY, value).apply()
 
     var danmakuTextSizeSp: Float
-        get() = prefs.getFloat(KEY_DANMAKU_TEXT_SIZE_SP, 18f)
+        get() = prefs.getFloat(KEY_DANMAKU_TEXT_SIZE_SP, 40f)
         set(value) = prefs.edit().putFloat(KEY_DANMAKU_TEXT_SIZE_SP, value).apply()
 
     var danmakuLaneDensity: String
@@ -595,7 +595,7 @@ class AppPrefs(context: Context) {
         }
 
     var playerOpenDetailBeforePlay: Boolean
-        get() = prefs.getBoolean(KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY, false)
+        get() = prefs.getBoolean(KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY, true)
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY, value).apply()
 
     var fullscreenEnabled: Boolean
@@ -799,7 +799,7 @@ class AppPrefs(context: Context) {
         }
 
     var playerPlaybackMode: String
-        get() = PlayerPlaybackModes.normalize(prefs.getString(KEY_PLAYER_PLAYBACK_MODE, PLAYER_PLAYBACK_MODE_NONE))
+        get() = PlayerPlaybackModes.normalize(prefs.getString(KEY_PLAYER_PLAYBACK_MODE, PLAYER_PLAYBACK_MODE_PARTS_LIST))
         set(value) = prefs.edit().putString(KEY_PLAYER_PLAYBACK_MODE, PlayerPlaybackModes.normalize(value)).apply()
 
     var playerSettingsApplyToGlobal: Boolean
@@ -1180,7 +1180,7 @@ class AppPrefs(context: Context) {
         const val DANMAKU_AREA_MIN = 0.10f
         const val DANMAKU_AREA_MAX = 1.00f
         const val DANMAKU_AREA_STEP = 0.10f
-        const val DANMAKU_AREA_DEFAULT = DANMAKU_AREA_MAX
+        const val DANMAKU_AREA_DEFAULT = 0.30f // 默认弹幕占屏比 30%
         const val DANMAKU_AREA_COMPAT_EPSILON = 0.0001f
 
         val DANMAKU_AREA_OPTIONS: List<Float> = (1..10).map { it / 10f }
