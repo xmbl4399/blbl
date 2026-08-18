@@ -107,6 +107,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 config =
                     DpadGridController.Config(
                         isEnabled = { _binding != null && isResumed },
+                        // 列表顶部有跨列 header(group 0),第一行卡片在 group 1,视作顶部行
+                        topHeaderGroups = 1,
                     ),
             ).also { it.install() }
 
@@ -158,17 +160,24 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
             AppLog.d("BangumiCalendar", "quarter tab focus pos=$position")
         }
 
-        // 季度 tab 上按 DOWN -> 聚焦卡片区
+        // 季度 tab:DOWN -> 卡片区;UP -> 首页 tab 栏(新番表栏)
         val tabStrip = binding.tabQuarter.getChildAt(0) as? ViewGroup ?: return
         for (i in 0 until tabStrip.childCount) {
             tabStrip.getChildAt(i).setOnKeyListener { _, keyCode, event ->
-                if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    pendingFocusFirstCardFromTab = true
-                    pendingFocusFirstCardFromContentSwitch = false
-                    pendingFocusFirstCardFromBackToTab0 = false
-                    maybeConsumePendingFocusFirstCard()
-                } else {
-                    false
+                if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        pendingFocusFirstCardFromTab = true
+                        pendingFocusFirstCardFromContentSwitch = false
+                        pendingFocusFirstCardFromBackToTab0 = false
+                        maybeConsumePendingFocusFirstCard()
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusSelectedTabIfAvailable()
+                        true
+                    }
+                    else -> false
                 }
             }
         }

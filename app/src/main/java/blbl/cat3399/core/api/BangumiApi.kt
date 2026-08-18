@@ -124,7 +124,8 @@ object BangumiApi {
      * 缓存:当季 12h(每周看一次),历史季度 30 天(放送进度固定不变)。
      */
     suspend fun browseQuarter(year: Int, quarterMonth: Int): List<BangumiCalendarItem> {
-        val cacheName = "browse_${year}_$quarterMonth.json"
+        // v2:缓存原始 items JSON(与在线解析一致);旧 v1 序列化格式不兼容,加后缀强制重建
+        val cacheName = "browse_${year}_${quarterMonth}_v2.json"
         val isCurrent = SeasonSpec.current().let { it.year == year && it.month == quarterMonth }
         val cacheAge = if (isCurrent) QUARTER_CACHE_AGE_MS else QUARTER_CACHE_AGE_MS_HISTORY
         val cachedRaw = readCache(cacheName)
@@ -143,23 +144,28 @@ object BangumiApi {
         fallbackRaw: String?,
     ): List<BangumiCalendarItem> {
         return try {
-            val out = ArrayList<BangumiCalendarItem>()
+            // 缓存原始 items JSON(保留 images/rating/tags 原始结构,与在线解析一致),
+            // 这样封面/评分/tag 从缓存解析与在线结果相同
+            val rawItems = JSONArray()
             val seen = HashSet<Long>()
             val months = listOf(quarterMonth, if (quarterMonth == 10) 11 else quarterMonth + 3)
             for (m in months) {
                 var offset = 0
                 while (true) {
-                    val page = browseMonth(year, m, offset = offset)
-                    if (page.isEmpty()) break
-                    page.forEach { if (seen.add(it.id)) out += it }
-                    if (page.size < 100) break
+                    val root = JSONObject(fetch("$BASE/v0/subjects?type=2&year=$year&month=$m&limit=100&sort=rank&offset=$offset"))
+                    val data = root.optJSONArray("data") ?: JSONArray()
+                    for (i in 0 until data.length()) {
+                        val obj = data.getJSONObject(i)
+                        val id = obj.optLong("id", 0L)
+                        if (seen.add(id)) rawItems.put(obj)
+                    }
+                    if (data.length() < 100) break
                     offset += 100
                     if (offset > 500) break // 防死循环
                 }
             }
-            val raw = serializeItems(out)
-            writeCache(cacheName, raw)
-            out
+            writeCache(cacheName, rawItems.toString())
+            withContext(Dispatchers.Default) { parseItems(rawItems) }
         } catch (t: Throwable) {
             // 网络失败:降级用旧缓存(即使已过期)
             if (fallbackRaw != null) {
@@ -168,13 +174,6 @@ object BangumiApi {
             }
             throw t
         }
-    }
-
-    /** 按月浏览:网页 airtime/yyyy-m 语义,返回该月开播新番(limit 上限 100,按 total 分页)。 */
-    private suspend fun browseMonth(year: Int, month: Int, offset: Int = 0): List<BangumiCalendarItem> {
-        val raw =
-            fetch("$BASE/v0/subjects?type=2&year=$year&month=$month&limit=100&sort=rank&offset=$offset")
-        return withContext(Dispatchers.Default) { parseBrowse(raw) }
     }
 
     /**
@@ -254,37 +253,12 @@ object BangumiApi {
         }
     }
 
-    private fun parseBrowse(raw: String): List<BangumiCalendarItem> {
-        val root = JSONObject(raw)
-        return parseItems(root.optJSONArray("data") ?: JSONArray())
-    }
-
     private fun parseItems(arr: JSONArray): List<BangumiCalendarItem> {
         val items = ArrayList<BangumiCalendarItem>(arr.length())
         for (i in 0 until arr.length()) {
             items += parseItem(arr.getJSONObject(i))
         }
         return items
-    }
-
-    private fun serializeItems(items: List<BangumiCalendarItem>): String {
-        val arr = JSONArray()
-        for (item in items) {
-            val o = JSONObject()
-            o.put("id", item.id)
-            o.put("name", item.name)
-            o.put("name_cn", item.nameCn)
-            item.coverUrl?.let { o.put("cover", it) }
-            item.airDate?.let { o.put("air_date", it) }
-            item.score?.let { o.put("score", it) }
-            item.rank?.let { o.put("rank", it) }
-            item.summary?.let { o.put("summary", it) }
-            item.tags.forEach { o.append("tags", it) }
-            item.totalEpisodes?.let { o.put("eps", it) }
-            item.airedEpisodes?.let { o.put("aired", it) }
-            arr.put(o)
-        }
-        return arr.toString()
     }
 
     private fun parseItem(it: JSONObject): BangumiCalendarItem {

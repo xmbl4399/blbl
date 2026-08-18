@@ -87,6 +87,12 @@ internal class DpadGridController(
          * move focus elsewhere). This helps prevent focus from "escaping" unexpectedly.
          */
         val consumeUpAtTopEdge: Boolean = true,
+        /**
+         * 列表顶部被跨列 header 占用的 span group 数。
+         * 例如"分组标题跨整行 + 卡片网格"布局中,header 自成一个 group,
+         * 第一行卡片位于 group 1;设 1 后 group 1 也视为顶部行,UP 可上移到 header/季度栏。
+         */
+        val topHeaderGroups: Int = 0,
     )
 
     interface Callbacks {
@@ -1004,7 +1010,8 @@ internal class DpadGridController(
             is GridLayoutManager -> {
                 val spanCount = lm.spanCount.coerceAtLeast(1)
                 val groupIndex = lm.spanSizeLookup.getSpanGroupIndex(position, spanCount)
-                if (groupIndex != 0) return false
+                // 跳过顶部跨列 header 组:header 后的第一个卡片组也视为顶部行
+                if (groupIndex != config.topHeaderGroups) return false
 
                 val firstVisible = lm.findFirstVisibleItemPosition()
                 firstVisible == 0 || !recyclerView.canScrollVertically(-1)
