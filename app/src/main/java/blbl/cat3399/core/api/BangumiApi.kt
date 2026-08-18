@@ -16,15 +16,14 @@ import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 /**
- * Bangumi (bgm.tv) 数据源:星期视图时间表 + 历史季度浏览。
+ * Bangumi (bgm.tv) 数据源:季度番剧列表(统一当年/历史季度,不再按星期分组)。
  *
- * - 当季:GET /calendar —— 按周一~周日分组,随季度自动更新(12h 文件缓存)
- * - 历史季度:GET /v0/subjects?type=2&year=&month=&limit=100&sort=rank
+ * - 端点:GET /v0/subjects?type=2&year=&month=&limit=100&sort=rank
  *   —— 与网页 bangumi.tv/anime/browser/airtime/yyyy-m 同语义:返回该月开播的新番
  *   (季度首月 1/4/7/10;2025-4=25春、2025-7=25夏),实测单月 68-80 条
- *   —— browse 响应为 {data:[...]} 包裹结构,无星期字段,列表展示
- * - 当季卡片流派标签:calendar 不含 tags,由 browse 按季度首月+次月合并补充
- *   (实测覆盖 calendar 约 56%,跨季长番无法覆盖属数据特性)
+ *   —— 响应为 {data:[...]} 包裹结构,无星期字段
+ * - browse 自带 tags(白名单过滤)与 eps 总话数,无需二次合并
+ * - 每季度 12h 文件缓存(按 year_month 命名)
  *
  * 无需鉴权(匿名访问),B站番剧时间表 API 留作备源。
  */
@@ -32,9 +31,7 @@ object BangumiApi {
     private const val TAG = "BangumiApi"
     private const val BASE = "https://api.bgm.tv"
     private const val USER_AGENT = "blbl/0.1 (https://github.com/cat3399/blbl; bangumi calendar)"
-    private const val CALENDAR_CACHE_AGE_MS = 12 * 60 * 60 * 1000L
-    private const val CALENDAR_CACHE_FILE = "calendar.json"
-    private const val TAGS_CACHE_FILE = "browse_tags.json"
+    private const val QUARTER_CACHE_AGE_MS = 12 * 60 * 60 * 1000L
 
     private lateinit var cacheDir: File
 
@@ -53,23 +50,12 @@ object BangumiApi {
         val year: Int,
         val month: Int, // 1/4/7/10
     ) {
-        val season: String
-            get() = when (month) {
-                1 -> "winter"
-                4 -> "spring"
-                7 -> "summer"
-                else -> "autumn"
-            }
-
-        val seasonCn: String
-            get() = seasonLabel(month)
-
         /** 紧凑标签,如 "25夏" */
         val label: String
             get() = "${year % 100}${seasonCn}"
 
-        companion object {
-            fun seasonLabel(month: Int): String =
+        val seasonCn: String
+            get() =
                 when (month) {
                     1 -> "冬"
                     4 -> "春"
@@ -77,6 +63,7 @@ object BangumiApi {
                     else -> "秋"
                 }
 
+        companion object {
             /** 当前公历日所在的放送季(1月=冬,4月=春,7月=夏,10月=秋) */
             fun current(): SeasonSpec {
                 val now = Calendar.getInstance()
@@ -128,121 +115,59 @@ object BangumiApi {
     }
 
     /**
-     * 星期视图:GET /calendar。
-     * 优先返回未过期(12h)缓存;网络失败时降级用旧缓存。
-     */
-    suspend fun calendar(): List<BangumiCalendarDay> {
-        val cachedRaw = readCache(CALENDAR_CACHE_FILE)
-        val cacheFresh = cachedRaw != null && cacheAgeMs(CALENDAR_CACHE_FILE) < CALENDAR_CACHE_AGE_MS
-        if (cacheFresh) {
-            AppLog.i(TAG, "calendar served from cache")
-            return runCatching { withContext(Dispatchers.Default) { parseCalendar(cachedRaw!!) } }
-                .getOrElse { fetchCalendarAndCache() }
-        }
-        return fetchCalendarAndCache()
-    }
-
-    /**
-     * 星期视图(带流派标签):calendar(12h 缓存) + 当季 browse 按 id 合并 tags。
-     * calendar 接口本身不含 tags;当季按季度首月+次月合并,覆盖约 6 成卡片。
-     * 合并失败时降级为无标签(不影响星期视图)。
-     */
-    suspend fun calendarWithTags(): List<BangumiCalendarDay> {
-        val days = calendar()
-        val tagMap = runCatching { browseTagsForCurrentSeason() }.getOrDefault(emptyMap())
-        if (tagMap.isEmpty()) return days
-        return days.map { day ->
-            day.copy(
-                items = day.items.map { item ->
-                    val tags = tagMap[item.id]
-                    if (tags.isNullOrEmpty()) item else item.copy(tags = tags)
-                },
-            )
-        }
-    }
-
-    /**
-     * 按月浏览:网页 airtime/yyyy-m 语义,返回该月开播新番(limit 上限 100,按 total 分页)。
-     */
-    suspend fun browseMonth(year: Int, month: Int, offset: Int = 0): List<BangumiCalendarItem> {
-        val raw =
-            fetch("$BASE/v0/subjects?type=2&year=$year&month=$month&limit=100&sort=rank&offset=$offset")
-        return withContext(Dispatchers.Default) { parseBrowse(raw) }
-    }
-
-    /**
-     * 季度全量:分页拉完整个季度(首月 + 次月,当月开播 + 次月补档),
-     * 按 total 翻页并去重。历史季度展示用 [browseMonth] 单月即可,本方法用于当季 tag 合并。
+     * 季度番剧:分页拉完整个季度(首月 + 次月,当月开播 + 次月补档),按 total 翻页去重。
+     * 带 12h 文件缓存(按 year_month 命名),网络失败降级旧缓存。
      */
     suspend fun browseQuarter(year: Int, quarterMonth: Int): List<BangumiCalendarItem> {
-        val out = ArrayList<BangumiCalendarItem>()
-        val seen = HashSet<Long>()
-        val months = listOf(quarterMonth, if (quarterMonth == 10) 11 else quarterMonth + 3)
-        for (m in months) {
-            var offset = 0
-            while (true) {
-                val page = browseMonth(year, m, offset = offset)
-                if (page.isEmpty()) break
-                page.forEach { if (seen.add(it.id)) out += it }
-                if (page.size < 100) break
-                offset += 100
-                if (offset > 500) break // 防死循环
-            }
+        val cacheName = "browse_${year}_$quarterMonth.json"
+        val cachedRaw = readCache(cacheName)
+        if (cachedRaw != null && cacheAgeMs(cacheName) < QUARTER_CACHE_AGE_MS) {
+            AppLog.i(TAG, "browseQuarter $year-$quarterMonth served from cache")
+            return runCatching { withContext(Dispatchers.Default) { parseItems(JSONArray(cachedRaw!!)) } }
+                .getOrElse { fetchQuarter(year, quarterMonth, cacheName, fallbackRaw = cachedRaw) }
         }
-        return out
+        return fetchQuarter(year, quarterMonth, cacheName, fallbackRaw = cachedRaw)
     }
 
-    /** 当季 browse 合并,收集 id -> 白名单 tags,12h 缓存 */
-    private suspend fun browseTagsForCurrentSeason(): Map<Long, List<String>> {
-        val cached = readCache(TAGS_CACHE_FILE)
-        if (cached != null && cacheAgeMs(TAGS_CACHE_FILE) < CALENDAR_CACHE_AGE_MS) {
-            return parseTagMap(cached)
-        }
-        val spec = SeasonSpec.current()
-        val map = HashMap<Long, List<String>>(320)
-        try {
-            browseQuarter(spec.year, spec.month).forEach { map[it.id] = it.tags }
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "browse tags failed", t)
-        }
-        writeCache(TAGS_CACHE_FILE, serializeTagMap(map))
-        return map
-    }
-
-    private fun serializeTagMap(map: Map<Long, List<String>>): String {
-        val root = JSONObject()
-        for ((id, tags) in map) root.put(id.toString(), JSONArray(tags))
-        return root.toString()
-    }
-
-    private fun parseTagMap(raw: String): Map<Long, List<String>> {
-        return runCatching {
-            val root = JSONObject(raw)
-            val map = HashMap<Long, List<String>>(root.length())
-            for (key in root.keys()) {
-                val arr = root.optJSONArray(key) ?: continue
-                val tags = ArrayList<String>(arr.length())
-                for (i in 0 until arr.length()) tags += arr.optString(i).orEmpty()
-                key.toLongOrNull()?.let { map[it] = tags }
-            }
-            map
-        }.getOrDefault(emptyMap())
-    }
-
-    private suspend fun fetchCalendarAndCache(): List<BangumiCalendarDay> {
-        val cachedRaw = readCache(CALENDAR_CACHE_FILE)
+    private suspend fun fetchQuarter(
+        year: Int,
+        quarterMonth: Int,
+        cacheName: String,
+        fallbackRaw: String?,
+    ): List<BangumiCalendarItem> {
         return try {
-            val raw = fetch("$BASE/calendar")
-            writeCache(CALENDAR_CACHE_FILE, raw)
-            withContext(Dispatchers.Default) { parseCalendar(raw) }
+            val out = ArrayList<BangumiCalendarItem>()
+            val seen = HashSet<Long>()
+            val months = listOf(quarterMonth, if (quarterMonth == 10) 11 else quarterMonth + 3)
+            for (m in months) {
+                var offset = 0
+                while (true) {
+                    val page = browseMonth(year, m, offset = offset)
+                    if (page.isEmpty()) break
+                    page.forEach { if (seen.add(it.id)) out += it }
+                    if (page.size < 100) break
+                    offset += 100
+                    if (offset > 500) break // 防死循环
+                }
+            }
+            val raw = serializeItems(out)
+            writeCache(cacheName, raw)
+            out
         } catch (t: Throwable) {
             // 网络失败:降级用旧缓存(即使已过期)
-            if (cachedRaw != null) {
-                AppLog.w(TAG, "calendar fetch failed, fallback to stale cache", t)
-                return withContext(Dispatchers.Default) { parseCalendar(cachedRaw) }
+            if (fallbackRaw != null) {
+                AppLog.w(TAG, "browseQuarter $year-$quarterMonth fetch failed, fallback to stale cache", t)
+                return withContext(Dispatchers.Default) { parseItems(JSONArray(fallbackRaw)) }
             }
             throw t
         }
+    }
+
+    /** 按月浏览:网页 airtime/yyyy-m 语义,返回该月开播新番(limit 上限 100,按 total 分页)。 */
+    private suspend fun browseMonth(year: Int, month: Int, offset: Int = 0): List<BangumiCalendarItem> {
+        val raw =
+            fetch("$BASE/v0/subjects?type=2&year=$year&month=$month&limit=100&sort=rank&offset=$offset")
+        return withContext(Dispatchers.Default) { parseBrowse(raw) }
     }
 
     private suspend fun fetch(url: String): String {
@@ -258,34 +183,36 @@ object BangumiApi {
         }
     }
 
-    private fun parseCalendar(raw: String): List<BangumiCalendarDay> {
-        val arr = JSONArray(raw)
-        val days = ArrayList<BangumiCalendarDay>(arr.length())
-        for (i in 0 until arr.length()) {
-            val day = arr.getJSONObject(i)
-            val weekday = day.optJSONObject("weekday")
-            val weekdayId = weekday?.optInt("id", 0) ?: 0
-            val weekdayCn = weekday?.optString("cn").orEmpty().ifBlank { "周$weekdayId" }
-            val itemsArr = day.optJSONArray("items") ?: JSONArray()
-            val items = ArrayList<BangumiCalendarItem>(itemsArr.length())
-            for (j in 0 until itemsArr.length()) {
-                items += parseItem(itemsArr.getJSONObject(j))
-            }
-            if (items.isNotEmpty()) {
-                days += BangumiCalendarDay(weekdayId = weekdayId, weekdayCn = weekdayCn, items = items)
-            }
-        }
-        return days
-    }
-
     private fun parseBrowse(raw: String): List<BangumiCalendarItem> {
         val root = JSONObject(raw)
-        val arr = root.optJSONArray("data") ?: JSONArray()
+        return parseItems(root.optJSONArray("data") ?: JSONArray())
+    }
+
+    private fun parseItems(arr: JSONArray): List<BangumiCalendarItem> {
         val items = ArrayList<BangumiCalendarItem>(arr.length())
         for (i in 0 until arr.length()) {
             items += parseItem(arr.getJSONObject(i))
         }
         return items
+    }
+
+    private fun serializeItems(items: List<BangumiCalendarItem>): String {
+        val arr = JSONArray()
+        for (item in items) {
+            val o = JSONObject()
+            o.put("id", item.id)
+            o.put("name", item.name)
+            o.put("name_cn", item.nameCn)
+            item.coverUrl?.let { o.put("cover", it) }
+            item.airDate?.let { o.put("air_date", it) }
+            item.score?.let { o.put("score", it) }
+            item.rank?.let { o.put("rank", it) }
+            item.summary?.let { o.put("summary", it) }
+            item.tags.forEach { o.append("tags", it) }
+            item.totalEpisodes?.let { o.put("eps", it) }
+            arr.put(o)
+        }
+        return arr.toString()
     }
 
     private fun parseItem(it: JSONObject): BangumiCalendarItem {
@@ -295,7 +222,6 @@ object BangumiApi {
                 ?: images?.optString("large").orEmpty().takeIf { c -> c.isNotBlank() }
         val rating = it.optJSONObject("rating")
         val scoreRaw = rating?.optDouble("score", Double.NaN)
-        // calendar 用 air_date;browse 用 date
         val airDate =
             it.optString("air_date").orEmpty().takeIf { d -> d.isNotBlank() }
                 ?: it.optString("date").orEmpty().takeIf { d -> d.isNotBlank() }
@@ -309,6 +235,7 @@ object BangumiApi {
             rank = it.optInt("rank", -1).takeIf { r -> r > 0 },
             summary = it.optString("summary").orEmpty().takeIf { s -> s.isNotBlank() },
             tags = parseTags(it.optJSONArray("tags")),
+            totalEpisodes = it.optInt("eps", 0).takeIf { e -> e > 0 },
         )
     }
 

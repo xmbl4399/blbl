@@ -1,6 +1,7 @@
 package blbl.cat3399.feature.home
 
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -20,6 +21,7 @@ import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.DpadGridController
 import blbl.cat3399.core.ui.FocusTreeUtils
 import blbl.cat3399.core.ui.TabSwitchFocusTarget
+import blbl.cat3399.core.ui.enableDpadTabFocus
 import blbl.cat3399.core.ui.postIfAlive
 import blbl.cat3399.core.ui.postIfAttached
 import blbl.cat3399.core.ui.requestFocusAdapterPositionReliable
@@ -84,7 +86,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 callbacks =
                     object : DpadGridController.Callbacks {
                         override fun onTopEdge(): Boolean {
-                            focusSelectedTabIfAvailable()
+                            // 卡片区上边缘 -> 聚焦季度切换栏
+                            focusQuarterBar()
                             return true
                         }
 
@@ -128,6 +131,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     }
 
     // ---- 季度切换栏(单排:最新在前,如 26夏 26春 25冬 ...) ----
+    // D-pad:方向键在季度间移动焦点(不切换),按 OK/确认键才加载所选季度;
+    // 鼠标/触控点击 tab 直接切换。
 
     private fun setupSeasonBar() {
         val quarters = BangumiApi.SeasonSpec.recentQuarters(QUARTER_COUNT)
@@ -147,6 +152,26 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
 
         quarters.forEach { q -> binding.tabQuarter.addTab(binding.tabQuarter.newTab().setText(q.label)) }
 
+        // 焦点移动不选中(selectOnFocus=false),仅 OK/点击时才 select
+        binding.tabQuarter.enableDpadTabFocus(selectOnFocus = false) { position ->
+            AppLog.d("BangumiCalendar", "quarter tab focus pos=$position")
+        }
+
+        // 季度 tab 上按 DOWN -> 聚焦卡片区
+        val tabStrip = binding.tabQuarter.getChildAt(0) as? ViewGroup ?: return
+        for (i in 0 until tabStrip.childCount) {
+            tabStrip.getChildAt(i).setOnKeyListener { _, keyCode, event ->
+                if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    pendingFocusFirstCardFromTab = true
+                    pendingFocusFirstCardFromContentSwitch = false
+                    pendingFocusFirstCardFromBackToTab0 = false
+                    maybeConsumePendingFocusFirstCard()
+                } else {
+                    false
+                }
+            }
+        }
+
         // 默认选中当前季(第一个);seasonBarReady=false 期间回调被忽略
         binding.tabQuarter.getTabAt(0)?.select()
         seasonBarReady = true
@@ -156,7 +181,18 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
         if (spec == selectedSpec) return
         AppLog.d("BangumiCalendar", "switch season ${selectedSpec.label} -> ${spec.label}")
         selectedSpec = spec
+        // 加载完成后把焦点从季度栏带回卡片区
+        pendingFocusFirstCardFromTab = true
+        pendingFocusFirstCardFromContentSwitch = false
+        pendingFocusFirstCardFromBackToTab0 = false
         resetAndLoad(fromUserRefresh = false)
+    }
+
+    /** 卡片区 UP -> 聚焦季度栏当前选中项 */
+    private fun focusQuarterBar(): Boolean {
+        val tabStrip = binding.tabQuarter.getChildAt(0) as? ViewGroup ?: return false
+        val pos = binding.tabQuarter.selectedTabPosition.takeIf { it >= 0 } ?: 0
+        return tabStrip.getChildAt(pos)?.requestFocus() ?: false
     }
 
     private fun buildGridLayoutManager(): GridLayoutManager {
@@ -204,19 +240,11 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
         val spec = selectedSpec
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val current = BangumiApi.SeasonSpec.current()
-                val days: List<BangumiCalendarDay> =
-                    if (spec == current) {
-                        // 当季:星期视图(calendar + browse 合并 tags)
-                        BangumiApi.calendarWithTags()
-                    } else {
-                        // 历史季度:网页 airtime/yyyy-m 语义,当月开播新番,单 header 标题
-                        val items = BangumiApi.browseMonth(spec.year, spec.month)
-                        listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = items))
-                    }
+                // 统一列表视图:当年/历史季度均为该季开播新番(网页 airtime/yyyy-m 语义)
+                val items = BangumiApi.browseQuarter(spec.year, spec.month)
                 if (token != requestToken) return@launch
-                adapter.submit(days)
-                AppLog.i("BangumiCalendar", "load ok spec=${spec.label} days=${days.size} cards=${days.sumOf { it.items.size }}")
+                adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = items)))
+                AppLog.i("BangumiCalendar", "load ok spec=${spec.label} cards=${items.size}")
 
                 _binding?.let { b ->
                     b.recycler.postIfAlive(isAlive = { _binding === b && isResumed }) {
@@ -455,7 +483,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     }
 
     companion object {
-        private const val QUARTER_COUNT = 12
+        private const val QUARTER_COUNT = 24
 
         fun newInstance(): BangumiCalendarFragment = BangumiCalendarFragment()
     }

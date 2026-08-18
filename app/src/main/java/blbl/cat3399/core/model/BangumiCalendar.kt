@@ -1,13 +1,13 @@
 package blbl.cat3399.core.model
 
 /**
- * Bangumi (bgm.tv) 星期视图时间表数据模型。
- * 数据源:GET https://api.bgm.tv/calendar,按周一~周日分组返回当季放送番剧。
+ * Bangumi (bgm.tv) 季度番剧数据模型。
+ * 数据源:GET /v0/subjects?type=2&year=&month=&sort=rank(网页 airtime/yyyy-m 语义)。
  */
 data class BangumiCalendarDay(
-    /** 星期编号 1=周一 ... 7=周日;历史季度列表视图时为 0 */
+    /** 分组 id;统一列表视图时为 0 */
     val weekdayId: Int,
-    /** 中文星期名(如"周一");历史季度为季度标题 */
+    /** 分组标题(如 "26夏"、"星期一") */
     val weekdayCn: String,
     val items: List<BangumiCalendarItem>,
 )
@@ -29,6 +29,8 @@ data class BangumiCalendarItem(
     val summary: String?,
     /** 流派标签(已按常见番剧分类白名单过滤,最多 2 个) */
     val tags: List<String>,
+    /** 总话数(eps,Bangumi 无"已播话数"概念) */
+    val totalEpisodes: Int?,
 ) {
     /** 用于 B站搜索的名称:优先中文译名,无则用原始标题 */
     val searchKeyword: String

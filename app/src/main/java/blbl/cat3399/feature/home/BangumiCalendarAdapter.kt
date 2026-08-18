@@ -135,8 +135,14 @@ class BangumiCalendarAdapter(
                 }
             }
 
-            // 番剧名称下方的放送时间/评分/编号已移除
-            binding.tvSubtitle.isVisible = false
+            // 分集信息:卡片左下角(Bangumi 仅提供总话数 eps,无"已播话数")
+            val eps = item.totalEpisodes
+            if (eps != null && eps > 0) {
+                binding.tvSubtitle.visibility = View.VISIBLE
+                binding.tvSubtitle.text = "${eps}集"
+            } else {
+                binding.tvSubtitle.isVisible = false
+            }
 
             ImageLoader.loadInto(binding.ivCover, ImageUrl.poster(item.coverUrl))
             binding.root.setOnClickListener {
