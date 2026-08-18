@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit
 object BangumiApi {
     private const val TAG = "BangumiApi"
     private const val BASE = "https://api.bgm.tv"
-    private const val USER_AGENT = "blbl/0.1 (https://github.com/cat3399/blbl; bangumi calendar)"
+    private const val USER_AGENT = "blbl/0.1 (https://github.com/xmbl4399/blbl; bangumi calendar)"
     private const val QUARTER_CACHE_AGE_MS = 12 * 60 * 60 * 1000L
     private const val QUARTER_CACHE_AGE_MS_HISTORY = 30L * 24 * 60 * 60 * 1000L // 历史季度 30 天
     private const val PROGRESS_CACHE_AGE_MS = 24 * 60 * 60 * 1000L // 当季进度每日刷新
