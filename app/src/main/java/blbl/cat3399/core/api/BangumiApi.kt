@@ -131,8 +131,8 @@ object BangumiApi {
      * 缓存:当季 12h(每周看一次),历史季度 30 天(放送进度固定不变)。
      */
     suspend fun browseQuarter(year: Int, quarterMonth: Int): List<BangumiCalendarItem> {
-        // v2:缓存原始 items JSON(与在线解析一致);旧 v1 序列化格式不兼容,加后缀强制重建
-        val cacheName = "browse_${year}_${quarterMonth}_v2.json"
+        // v3:修复季度次月跨季 bug(春 4月 误拉 7月);旧 v2 缓存含跨季数据,加后缀强制重建
+        val cacheName = "browse_${year}_${quarterMonth}_v3.json"
         val isCurrent = SeasonSpec.current().let { it.year == year && it.month == quarterMonth }
         val cacheAge = if (isCurrent) QUARTER_CACHE_AGE_MS else QUARTER_CACHE_AGE_MS_HISTORY
         val cachedRaw = readCache(cacheName)
@@ -155,7 +155,8 @@ object BangumiApi {
             // 这样封面/评分/tag 从缓存解析与在线结果相同
             val rawItems = JSONArray()
             val seen = HashSet<Long>()
-            val months = listOf(quarterMonth, if (quarterMonth == 10) 11 else quarterMonth + 3)
+            // 季度覆盖首月+次月(不跨季):冬1+2 / 春4+5 / 夏7+8 / 秋10+11
+            val months = listOf(quarterMonth, quarterMonth + 1)
             for (m in months) {
                 var offset = 0
                 while (true) {
