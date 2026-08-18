@@ -227,12 +227,6 @@ class SettingsRenderer(
                     SettingEntry(SettingId.ThemePreset, "主题", SettingsText.themePresetText(prefs.themePreset), null),
                     SettingEntry(SettingId.ApiSource, "接口类别", SettingsText.apiSourceText(prefs.apiSource), null),
                     SettingEntry(SettingId.UserAgent, "User-Agent", prefs.userAgent.take(60), null),
-                    SettingEntry(
-                        SettingId.BangumiAccessToken,
-                        "Bangumi Token",
-                        if (prefs.bangumiAccessToken.isEmpty()) "未设置(匿名访问)" else prefs.bangumiAccessToken.take(40),
-                        "bgm.tv access token;配置后新番表可拉取 NSFW/完整条目",
-                    ),
                     SettingEntry(SettingId.Ipv4OnlyEnabled, "是否只允许使用IPV4", if (prefs.ipv4OnlyEnabled) "开" else "关", null),
                     SettingEntry(SettingId.GaiaVgate, "风控验证", gaiaVgateStatusText(), "播放被拦截后可在此手动完成人机验证"),
                     SettingEntry(SettingId.ClearCache, "清理缓存", cacheSizeText(), null),

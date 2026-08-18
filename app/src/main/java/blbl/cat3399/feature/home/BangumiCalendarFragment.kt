@@ -127,31 +127,17 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
         return true
     }
 
-    // ---- 季度切换栏 ----
+    // ---- 季度切换栏(单排:最新在前,如 26夏 26春 25冬 ...) ----
 
     private fun setupSeasonBar() {
-        val current = BangumiApi.SeasonSpec.current()
-        val years = (current.year - 4..current.year).toList()
-        val seasons = listOf("winter", "spring", "summer", "autumn")
+        val quarters = BangumiApi.SeasonSpec.recentQuarters(QUARTER_COUNT)
 
-        binding.tabYear.addOnTabSelectedListener(
+        binding.tabQuarter.addOnTabSelectedListener(
             object : TabLayout.OnTabSelectedListener {
                 override fun onTabSelected(tab: TabLayout.Tab) {
                     if (!seasonBarReady) return
-                    val year = years.getOrNull(tab.position) ?: return
-                    selectSpecIfChanged(BangumiApi.SeasonSpec(year, selectedSpec.season))
-                }
-
-                override fun onTabUnselected(tab: TabLayout.Tab) = Unit
-                override fun onTabReselected(tab: TabLayout.Tab) = Unit
-            },
-        )
-        binding.tabSeason.addOnTabSelectedListener(
-            object : TabLayout.OnTabSelectedListener {
-                override fun onTabSelected(tab: TabLayout.Tab) {
-                    if (!seasonBarReady) return
-                    val season = seasons.getOrNull(tab.position) ?: return
-                    selectSpecIfChanged(BangumiApi.SeasonSpec(selectedSpec.year, season))
+                    val spec = quarters.getOrNull(tab.position) ?: return
+                    selectSpecIfChanged(spec)
                 }
 
                 override fun onTabUnselected(tab: TabLayout.Tab) = Unit
@@ -159,12 +145,10 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
             },
         )
 
-        years.forEach { y -> binding.tabYear.addTab(binding.tabYear.newTab().setText(y.toString())) }
-        seasons.forEach { s -> binding.tabSeason.addTab(binding.tabSeason.newTab().setText(BangumiApi.SeasonSpec.seasonLabel(s))) }
+        quarters.forEach { q -> binding.tabQuarter.addTab(binding.tabQuarter.newTab().setText(q.label)) }
 
-        // 默认选中当季(先加监听后 select,seasonBarReady=false 期间回调被忽略)
-        binding.tabYear.getTabAt((current.year - years.first()).coerceAtLeast(0))?.select()
-        binding.tabSeason.getTabAt(seasons.indexOf(current.season).coerceAtLeast(0))?.select()
+        // 默认选中当前季(第一个);seasonBarReady=false 期间回调被忽略
+        binding.tabQuarter.getTabAt(0)?.select()
         seasonBarReady = true
     }
 
@@ -226,8 +210,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                         // 当季:星期视图(calendar + browse 合并 tags)
                         BangumiApi.calendarWithTags()
                     } else {
-                        // 历史季度:分页拉全,按热度列表,单 header 标题
-                        val items = BangumiApi.browseAll(spec.year, spec.season)
+                        // 历史季度:网页 airtime/yyyy-m 语义,当月开播新番,单 header 标题
+                        val items = BangumiApi.browseMonth(spec.year, spec.month)
                         listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = items))
                     }
                 if (token != requestToken) return@launch
@@ -471,6 +455,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     }
 
     companion object {
+        private const val QUARTER_COUNT = 12
+
         fun newInstance(): BangumiCalendarFragment = BangumiCalendarFragment()
     }
 }

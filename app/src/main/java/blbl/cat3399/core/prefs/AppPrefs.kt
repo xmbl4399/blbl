@@ -140,11 +140,6 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_UA, DEFAULT_UA) ?: DEFAULT_UA
         set(value) = prefs.edit().putString(KEY_UA, value).apply()
 
-    /** Bangumi (bgm.tv) access token,用于 browse 拉取 NSFW/完整条目(可选,空则匿名访问) */
-    var bangumiAccessToken: String
-        get() = prefs.getString(KEY_BANGUMI_ACCESS_TOKEN, null)?.trim().orEmpty()
-        set(value) = prefs.edit().putString(KEY_BANGUMI_ACCESS_TOKEN, value?.trim()).apply()
-
     var apiSource: String
         get() = normalizeApiSource(prefs.getString(KEY_API_SOURCE, API_SOURCE_WEB))
         set(value) = prefs.edit().putString(KEY_API_SOURCE, normalizeApiSource(value)).apply()
@@ -1059,7 +1054,6 @@ class AppPrefs(context: Context) {
         private const val KEY_BILI_TICKET_CHECKED_EPOCH_DAY = "bili_ticket_checked_epoch_day"
 
         private const val KEY_UA = "ua"
-        private const val KEY_BANGUMI_ACCESS_TOKEN = "bangumi_access_token"
         private const val KEY_API_SOURCE = "api_source"
         private const val KEY_IPV4_ONLY_ENABLED = "ipv4_only_enabled"
         private const val KEY_DEVICE_BUVID = "device_buvid"

@@ -13,7 +13,6 @@ enum class SettingId(
     ThemePreset("theme_preset"),
     ApiSource("api_source"),
     UserAgent("user_agent"),
-    BangumiAccessToken("bangumi_access_token"),
     Ipv4OnlyEnabled("ipv4_only_enabled"),
     GaiaVgate("gaia_vgate"),
     ClearCache("clear_cache"),

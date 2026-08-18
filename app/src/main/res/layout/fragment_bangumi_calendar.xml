@@ -6,19 +6,9 @@
     android:background="?attr/blblPageBackdrop"
     android:orientation="vertical">
 
-    <!-- 年份切换栏 -->
+    <!-- 季度切换栏(单排,如 25夏 26冬;最新在前) -->
     <blbl.cat3399.core.ui.UserScaleTabLayout
-        android:id="@+id/tab_year"
-        style="@style/Widget.Blbl.TabLayout"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@android:color/transparent"
-        android:focusable="false"
-        app:tabMode="scrollable" />
-
-    <!-- 季度切换栏(冬/春/夏/秋) -->
-    <blbl.cat3399.core.ui.UserScaleTabLayout
-        android:id="@+id/tab_season"
+        android:id="@+id/tab_quarter"
         style="@style/Widget.Blbl.TabLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

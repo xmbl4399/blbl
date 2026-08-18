@@ -5,7 +5,6 @@ import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.BangumiCalendarDay
 import blbl.cat3399.core.model.BangumiCalendarItem
 import blbl.cat3399.core.net.await
-import blbl.cat3399.core.prefs.AppPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -17,13 +16,17 @@ import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 /**
- * Bangumi (bgm.tv) 数据源:星期视图时间表 + 历史季度浏览(业界标准)。
+ * Bangumi (bgm.tv) 数据源:星期视图时间表 + 历史季度浏览。
  *
  * - 当季:GET /calendar —— 按周一~周日分组,随季度自动更新(12h 文件缓存)
- * - 历史季度:GET /v0/subjects?type=2&year=&season=&limit=100&sort=rank —— 按热度列表
- *   (注意:browse 返回 {data:[...]} 包裹结构,且无星期字段,只能列表展示)
+ * - 历史季度:GET /v0/subjects?type=2&year=&month=&limit=100&sort=rank
+ *   —— 与网页 bangumi.tv/anime/browser/airtime/yyyy-m 同语义:返回该月开播的新番
+ *   (季度首月 1/4/7/10;2025-4=25春、2025-7=25夏),实测单月 68-80 条
+ *   —— browse 响应为 {data:[...]} 包裹结构,无星期字段,列表展示
+ * - 当季卡片流派标签:calendar 不含 tags,由 browse 按季度首月+次月合并补充
+ *   (实测覆盖 calendar 约 56%,跨季长番无法覆盖属数据特性)
  *
- * 无需鉴权,仅需合法 User-Agent。备用源:B站番剧时间表 API(pgc schedule),留作后续扩展。
+ * 无需鉴权(匿名访问),B站番剧时间表 API 留作备源。
  */
 object BangumiApi {
     private const val TAG = "BangumiApi"
@@ -34,7 +37,6 @@ object BangumiApi {
     private const val TAGS_CACHE_FILE = "browse_tags.json"
 
     private lateinit var cacheDir: File
-    private lateinit var prefs: AppPrefs
 
     /** 常见番剧分类白名单:命中即作为卡片流派标签(取前 2 个) */
     private val TAG_WHITELIST =
@@ -46,36 +48,68 @@ object BangumiApi {
             "泡面番", "群像", "智斗", "犯罪", "末世", "科幻悬疑", "恋爱喜剧",
         )
 
+    /** 季度规格:year + 季度首月(1/4/7/10),对应网页 airtime/yyyy-m */
     data class SeasonSpec(
         val year: Int,
-        val season: String, // winter/spring/summer/autumn
+        val month: Int, // 1/4/7/10
     ) {
+        val season: String
+            get() = when (month) {
+                1 -> "winter"
+                4 -> "spring"
+                7 -> "summer"
+                else -> "autumn"
+            }
+
+        val seasonCn: String
+            get() = seasonLabel(month)
+
+        /** 紧凑标签,如 "25夏" */
         val label: String
-            get() = "${year}${seasonLabel(season)}"
+            get() = "${year % 100}${seasonCn}"
 
         companion object {
-            fun seasonLabel(season: String): String =
-                when (season) {
-                    "winter" -> "冬"
-                    "spring" -> "春"
-                    "summer" -> "夏"
-                    "autumn" -> "秋"
-                    else -> season
+            fun seasonLabel(month: Int): String =
+                when (month) {
+                    1 -> "冬"
+                    4 -> "春"
+                    7 -> "夏"
+                    else -> "秋"
                 }
 
             /** 当前公历日所在的放送季(1月=冬,4月=春,7月=夏,10月=秋) */
             fun current(): SeasonSpec {
                 val now = Calendar.getInstance()
                 val year = now.get(Calendar.YEAR)
-                val month = now.get(Calendar.MONTH) // 0-based
-                val season =
-                    when (month) {
-                        0, 1, 2 -> "winter"
-                        3, 4, 5 -> "spring"
-                        6, 7, 8 -> "summer"
-                        else -> "autumn"
+                val m = now.get(Calendar.MONTH) + 1 // 1-based
+                val quarterMonth =
+                    when (m) {
+                        in 1..3 -> 1
+                        in 4..6 -> 4
+                        in 7..9 -> 7
+                        else -> 10
                     }
-                return SeasonSpec(year, season)
+                return SeasonSpec(year, quarterMonth)
+            }
+
+            /** 从当前季往前推 count 个季度,最新在前(如 [26夏, 26春, 25冬, ...]) */
+            fun recentQuarters(count: Int): List<SeasonSpec> {
+                val cur = current()
+                val out = ArrayList<SeasonSpec>(count)
+                var y = cur.year
+                var m = cur.month
+                for (i in 0 until count) {
+                    out += SeasonSpec(y, m)
+                    m =
+                        when (m) {
+                            1 -> 10
+                            4 -> 1
+                            7 -> 4
+                            else -> 7 // 10 -> 7
+                        }
+                    if (m == 10) y--
+                }
+                return out
             }
         }
     }
@@ -90,12 +124,8 @@ object BangumiApi {
     }
 
     fun init(context: Context) {
-        prefs = AppPrefs(context.applicationContext)
         cacheDir = File(context.cacheDir, "bangumi").apply { mkdirs() }
     }
-
-    /** 是否已配置 access token(匿名访问也能用,但 NSFW 条目仅 token 可见) */
-    fun hasAccessToken(): Boolean = prefs.bangumiAccessToken.isNotEmpty()
 
     /**
      * 星期视图:GET /calendar。
@@ -114,7 +144,7 @@ object BangumiApi {
 
     /**
      * 星期视图(带流派标签):calendar(12h 缓存) + 当季 browse 按 id 合并 tags。
-     * calendar 接口本身不含 tags;browse 分页拉全当季番剧,按热度覆盖约 6 成卡片。
+     * calendar 接口本身不含 tags;当季按季度首月+次月合并,覆盖约 6 成卡片。
      * 合并失败时降级为无标签(不影响星期视图)。
      */
     suspend fun calendarWithTags(): List<BangumiCalendarDay> {
@@ -131,46 +161,51 @@ object BangumiApi {
         }
     }
 
-    /** 历史季度:GET /v0/subjects,按 rank 排序的列表(无星期分组,自带 tags)。 */
-    suspend fun browse(year: Int, season: String, offset: Int = 0): List<BangumiCalendarItem> {
+    /**
+     * 按月浏览:网页 airtime/yyyy-m 语义,返回该月开播新番(limit 上限 100,按 total 分页)。
+     */
+    suspend fun browseMonth(year: Int, month: Int, offset: Int = 0): List<BangumiCalendarItem> {
         val raw =
-            fetch("$BASE/v0/subjects?type=2&year=$year&season=$season&limit=100&sort=rank&offset=$offset")
+            fetch("$BASE/v0/subjects?type=2&year=$year&month=$month&limit=100&sort=rank&offset=$offset")
         return withContext(Dispatchers.Default) { parseBrowse(raw) }
     }
 
     /**
-     * 历史季度全量:分页拉完整个季度(API limit 上限 100,按 total 翻页)。
-     * 带 access token 时可多拿到 NSFW/未公开条目(实测 2026 夏:匿名 250 → token 263)。
+     * 季度全量:分页拉完整个季度(首月 + 次月,当月开播 + 次月补档),
+     * 按 total 翻页并去重。历史季度展示用 [browseMonth] 单月即可,本方法用于当季 tag 合并。
      */
-    suspend fun browseAll(year: Int, season: String): List<BangumiCalendarItem> {
+    suspend fun browseQuarter(year: Int, quarterMonth: Int): List<BangumiCalendarItem> {
         val out = ArrayList<BangumiCalendarItem>()
-        var offset = 0
-        while (true) {
-            val page = browse(year, season, offset = offset)
-            if (page.isEmpty()) break
-            out.addAll(page)
-            if (page.size < 100) break
-            offset += 100
-            if (offset > 500) break // 防死循环
+        val seen = HashSet<Long>()
+        val months = listOf(quarterMonth, if (quarterMonth == 10) 11 else quarterMonth + 3)
+        for (m in months) {
+            var offset = 0
+            while (true) {
+                val page = browseMonth(year, m, offset = offset)
+                if (page.isEmpty()) break
+                page.forEach { if (seen.add(it.id)) out += it }
+                if (page.size < 100) break
+                offset += 100
+                if (offset > 500) break // 防死循环
+            }
         }
         return out
     }
 
-    /** 当季 browse 分页拉全,收集 id -> 白名单 tags,12h 缓存(匿名/带 token 分开缓存) */
+    /** 当季 browse 合并,收集 id -> 白名单 tags,12h 缓存 */
     private suspend fun browseTagsForCurrentSeason(): Map<Long, List<String>> {
-        val cacheName = if (prefs.bangumiAccessToken.isEmpty()) TAGS_CACHE_FILE else "${TAGS_CACHE_FILE}.auth"
-        val cached = readCache(cacheName)
-        if (cached != null && cacheAgeMs(cacheName) < CALENDAR_CACHE_AGE_MS) {
+        val cached = readCache(TAGS_CACHE_FILE)
+        if (cached != null && cacheAgeMs(TAGS_CACHE_FILE) < CALENDAR_CACHE_AGE_MS) {
             return parseTagMap(cached)
         }
         val spec = SeasonSpec.current()
         val map = HashMap<Long, List<String>>(320)
         try {
-            browseAll(spec.year, spec.season).forEach { map[it.id] = it.tags }
+            browseQuarter(spec.year, spec.month).forEach { map[it.id] = it.tags }
         } catch (t: Throwable) {
             AppLog.w(TAG, "browse tags failed", t)
         }
-        writeCache(cacheName, serializeTagMap(map))
+        writeCache(TAGS_CACHE_FILE, serializeTagMap(map))
         return map
     }
 
@@ -211,16 +246,13 @@ object BangumiApi {
     }
 
     private suspend fun fetch(url: String): String {
-        val reqBuilder =
+        val req =
             Request.Builder()
                 .url(url)
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "application/json")
-        // access token 可选;配置后可见 NSFW/未公开条目(OptionalHTTPBearer)
-        if (::prefs.isInitialized && prefs.bangumiAccessToken.isNotEmpty()) {
-            reqBuilder.header("Authorization", "Bearer ${prefs.bangumiAccessToken}")
-        }
-        return client.newCall(reqBuilder.build()).await().use { r ->
+                .build()
+        return client.newCall(req).await().use { r ->
             if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code} ${r.message}")
             r.body?.string().orEmpty()
         }
