@@ -31,7 +31,17 @@ data class BangumiCalendarItem(
     val tags: List<String>,
     /** 总话数(eps,Bangumi 无"已播话数"概念) */
     val totalEpisodes: Int?,
+    /** 已放送话数(当季由 /v0/episodes 按 airdate 计算,每日刷新;历史季度为 null) */
+    val airedEpisodes: Int?,
 ) {
+    /** 分集信息文案:有进度显示 "6/12集",仅总话数显示 "12集" */
+    val episodeText: String?
+        get() {
+            val total = totalEpisodes ?: return null
+            val aired = airedEpisodes
+            return if (aired != null && aired > 0 && aired < total) "${aired}/${total}集" else "${total}集"
+        }
+
     /** 用于 B站搜索的名称:优先中文译名,无则用原始标题 */
     val searchKeyword: String
         get() = nameCn.trim().takeIf { it.isNotEmpty() } ?: name.trim()

@@ -66,6 +66,22 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <!-- 分集信息徽章(封面左下角,默认隐藏;显示如 6/12集 或 12集) -->
+        <TextView
+            android:id="@+id/tv_episode_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="6dp"
+            android:background="@drawable/bg_bangumi_tag"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="3dp"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/iv_cover"
+            app:layout_constraintStart_toStartOf="@id/iv_cover" />
+
         <TextView
             android:id="@+id/tv_access_badge_text"
             android:layout_width="wrap_content"

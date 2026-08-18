@@ -6,6 +6,8 @@ import blbl.cat3399.core.model.BangumiCalendarDay
 import blbl.cat3399.core.model.BangumiCalendarItem
 import blbl.cat3399.core.net.await
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,6 +34,9 @@ object BangumiApi {
     private const val BASE = "https://api.bgm.tv"
     private const val USER_AGENT = "blbl/0.1 (https://github.com/cat3399/blbl; bangumi calendar)"
     private const val QUARTER_CACHE_AGE_MS = 12 * 60 * 60 * 1000L
+    private const val QUARTER_CACHE_AGE_MS_HISTORY = 30L * 24 * 60 * 60 * 1000L // 历史季度 30 天
+    private const val PROGRESS_CACHE_AGE_MS = 24 * 60 * 60 * 1000L // 当季进度每日刷新
+    private const val PROGRESS_CACHE_FILE = "progress_current.json"
 
     private lateinit var cacheDir: File
 
@@ -116,12 +121,14 @@ object BangumiApi {
 
     /**
      * 季度番剧:分页拉完整个季度(首月 + 次月,当月开播 + 次月补档),按 total 翻页去重。
-     * 带 12h 文件缓存(按 year_month 命名),网络失败降级旧缓存。
+     * 缓存:当季 12h(每周看一次),历史季度 30 天(放送进度固定不变)。
      */
     suspend fun browseQuarter(year: Int, quarterMonth: Int): List<BangumiCalendarItem> {
         val cacheName = "browse_${year}_$quarterMonth.json"
+        val isCurrent = SeasonSpec.current().let { it.year == year && it.month == quarterMonth }
+        val cacheAge = if (isCurrent) QUARTER_CACHE_AGE_MS else QUARTER_CACHE_AGE_MS_HISTORY
         val cachedRaw = readCache(cacheName)
-        if (cachedRaw != null && cacheAgeMs(cacheName) < QUARTER_CACHE_AGE_MS) {
+        if (cachedRaw != null && cacheAgeMs(cacheName) < cacheAge) {
             AppLog.i(TAG, "browseQuarter $year-$quarterMonth served from cache")
             return runCatching { withContext(Dispatchers.Default) { parseItems(JSONArray(cachedRaw!!)) } }
                 .getOrElse { fetchQuarter(year, quarterMonth, cacheName, fallbackRaw = cachedRaw) }
@@ -170,6 +177,70 @@ object BangumiApi {
         return withContext(Dispatchers.Default) { parseBrowse(raw) }
     }
 
+    /**
+     * 当季剧集进度:对当季每部番 GET /v0/episodes?subject_id=&type=0,
+     * 统计 airdate <= 今天的话数(已放送话数)。每日缓存刷新。
+     * 历史季度无需(放送结束,进度固定)。
+     */
+    suspend fun currentSeasonProgress(): Map<Long, Int> {
+        val cached = readCache(PROGRESS_CACHE_FILE)
+        if (cached != null && cacheAgeMs(PROGRESS_CACHE_FILE) < PROGRESS_CACHE_AGE_MS) {
+            AppLog.i(TAG, "progress served from cache")
+            return parseProgressMap(cached)
+        }
+        val spec = SeasonSpec.current()
+        val ids = runCatching { browseQuarter(spec.year, spec.month).map { it.id } }.getOrDefault(emptyList())
+        AppLog.i(TAG, "fetch progress for ${ids.size} subjects (current quarter)")
+        val map = HashMap<Long, Int>(ids.size)
+        // 分批并发,避免瞬时打满接口
+        coroutineScope {
+            for (chunk in ids.chunked(6)) {
+                val results = chunk.map { id -> async { id to runCatching { episodeAiredCount(id) }.getOrDefault(0) } }
+                for (d in results) {
+                    val (id, n) = d.await()
+                    if (n > 0) map[id] = n
+                }
+            }
+        }
+        writeCache(PROGRESS_CACHE_FILE, serializeProgressMap(map))
+        return map
+    }
+
+    /** 单部番剧已放送话数:airdate <= 今天 */
+    private suspend fun episodeAiredCount(subjectId: Long): Int {
+        val raw = fetch("$BASE/v0/episodes?subject_id=$subjectId&type=0&limit=100")
+        return withContext(Dispatchers.Default) {
+            val root = JSONObject(raw)
+            val arr = root.optJSONArray("data") ?: JSONArray()
+            val today = java.time.LocalDate.now()
+            var count = 0
+            for (i in 0 until arr.length()) {
+                val air = arr.getJSONObject(i).optString("airdate").orEmpty()
+                if (air.isNotBlank()) {
+                    runCatching { if (java.time.LocalDate.parse(air) <= today) count++ }
+                }
+            }
+            count
+        }
+    }
+
+    private fun serializeProgressMap(map: Map<Long, Int>): String {
+        val root = JSONObject()
+        for ((id, n) in map) root.put(id.toString(), n)
+        return root.toString()
+    }
+
+    private fun parseProgressMap(raw: String): Map<Long, Int> {
+        return runCatching {
+            val root = JSONObject(raw)
+            val map = HashMap<Long, Int>(root.length())
+            for (key in root.keys()) {
+                key.toLongOrNull()?.let { id -> map[id] = root.optInt(key, 0) }
+            }
+            map
+        }.getOrDefault(emptyMap())
+    }
+
     private suspend fun fetch(url: String): String {
         val req =
             Request.Builder()
@@ -210,6 +281,7 @@ object BangumiApi {
             item.summary?.let { o.put("summary", it) }
             item.tags.forEach { o.append("tags", it) }
             item.totalEpisodes?.let { o.put("eps", it) }
+            item.airedEpisodes?.let { o.put("aired", it) }
             arr.put(o)
         }
         return arr.toString()
@@ -236,6 +308,7 @@ object BangumiApi {
             summary = it.optString("summary").orEmpty().takeIf { s -> s.isNotBlank() },
             tags = parseTags(it.optJSONArray("tags")),
             totalEpisodes = it.optInt("eps", 0).takeIf { e -> e > 0 },
+            airedEpisodes = it.optInt("aired", 0).takeIf { a -> a > 0 }, // 缓存序列化用
         )
     }
 

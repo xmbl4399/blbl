@@ -14,6 +14,7 @@ import blbl.cat3399.databinding.FragmentSearchBinding
 import blbl.cat3399.feature.my.BangumiDetailActivity
 import blbl.cat3399.feature.video.removeVideoCardAndRestoreFocus
 import blbl.cat3399.ui.BackPressHandler
+import blbl.cat3399.ui.MainActivity
 import blbl.cat3399.ui.RefreshKeyHandler
 import blbl.cat3399.ui.SidebarFocusHost
 
@@ -90,6 +91,11 @@ class SearchFragment : Fragment(), BackPressHandler, RefreshKeyHandler {
         val focused = activity?.currentFocus
         if (focused == null || !FocusTreeUtils.isDescendantOf(focused, b.root)) return false
         AppLog.d("Back", "SearchFragment handleBackPressed resultsVisible=$resultsVisible")
+        // 从新番表跳转而来:返回键直接回到新番表并恢复点击卡片焦点
+        if (resultsVisible && (activity as? MainActivity)?.consumeSearchReturnToBangumi() == true) {
+            (activity as? MainActivity)?.returnToBangumiFromSearch()
+            return true
+        }
         return if (resultsVisible) {
             r.showInput()
             r.focusFirstKey()

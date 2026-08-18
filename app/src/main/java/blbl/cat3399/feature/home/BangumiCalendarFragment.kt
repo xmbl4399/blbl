@@ -59,6 +59,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     private var pendingFocusFirstCardFromContentSwitch: Boolean = false
     private var pendingFocusFirstCardFromBackToTab0: Boolean = false
     private var lastFocusedAdapterPosition: Int? = null
+    private var pendingRestorePosition: Int? = null
     private var dpadGridController: DpadGridController? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -69,8 +70,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         if (!::adapter.isInitialized) {
             adapter =
-                BangumiCalendarAdapter { item ->
-                    openSearchFor(item)
+                BangumiCalendarAdapter { position, item ->
+                    openSearchFor(position, item)
                 }
         }
 
@@ -238,6 +239,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     private fun loadSeason(isRefresh: Boolean = false) {
         val token = requestToken
         val spec = selectedSpec
+        val isCurrent = spec == BangumiApi.SeasonSpec.current()
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 // 统一列表视图:当年/历史季度均为该季开播新番(网页 airtime/yyyy-m 语义)
@@ -245,6 +247,21 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 if (token != requestToken) return@launch
                 adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = items)))
                 AppLog.i("BangumiCalendar", "load ok spec=${spec.label} cards=${items.size}")
+
+                // 当季:合并已放送话数(每日缓存,首次拉取较慢,列表先显示总话数)
+                if (isCurrent && token == requestToken) {
+                    val progress = BangumiApi.currentSeasonProgress()
+                    if (token != requestToken) return@launch
+                    if (progress.isNotEmpty()) {
+                        val merged =
+                            items.map { item ->
+                                val aired = progress[item.id]
+                                if (aired != null && aired > 0) item.copy(airedEpisodes = aired) else item
+                            }
+                        adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = merged)))
+                        AppLog.i("BangumiCalendar", "progress merged count=${progress.size}")
+                    }
+                }
 
                 _binding?.let { b ->
                     b.recycler.postIfAlive(isAlive = { _binding === b && isResumed }) {
@@ -287,11 +304,13 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
         }
     }
 
-    private fun openSearchFor(item: BangumiCalendarItem) {
+    private fun openSearchFor(position: Int, item: BangumiCalendarItem) {
         if (!isAdded) return
         val keyword = item.searchKeyword
         if (keyword.isEmpty()) return
-        (activity as? MainActivity)?.navigateToSearch(keyword)
+        // 记录点击卡片位置,搜索页返回时恢复焦点
+        if (position != RecyclerView.NO_POSITION) pendingRestorePosition = position
+        (activity as? MainActivity)?.navigateToSearch(keyword, returnToBangumi = true)
     }
 
     // ---- 焦点管理(与首页其他 tab 保持一致) ----
@@ -417,13 +436,16 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     private fun restoreFocusIfNeeded() {
         val recycler = _binding?.recycler ?: return
         if (recycler.hasFocus()) return
-        val pos = lastFocusedAdapterPosition ?: return
+        // 优先恢复"点击卡片跳搜索前"的位置(搜索页返回场景)
+        val pending = pendingRestorePosition
+        val pos = pending ?: lastFocusedAdapterPosition ?: return
         if (pos < 0 || pos >= adapter.itemCount) return
         if (adapter.isHeaderPosition(pos)) return
         recycler.postIfAlive(isAlive = { _binding != null && isResumed }) {
             recycler.scrollToPosition(pos)
             recycler.postIfAlive(isAlive = { _binding != null && isResumed }) {
                 recycler.findViewHolderForAdapterPosition(pos)?.itemView?.requestFocus()
+                if (pending != null) pendingRestorePosition = null
             }
         }
     }

@@ -21,7 +21,7 @@ import java.util.Locale
  * - 卡片行:番剧卡片(复用 item_bangumi_follow 布局,聚焦可点击)
  */
 class BangumiCalendarAdapter(
-    private val onClick: (item: BangumiCalendarItem) -> Unit,
+    private val onClick: (position: Int, item: BangumiCalendarItem) -> Unit,
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private sealed interface Row {
@@ -101,7 +101,7 @@ class BangumiCalendarAdapter(
     }
 
     class CardVh(private val binding: ItemBangumiFollowBinding) : RecyclerView.ViewHolder(binding.root) {
-        fun bind(item: BangumiCalendarItem, onClick: (BangumiCalendarItem) -> Unit) {
+        fun bind(item: BangumiCalendarItem, onClick: (position: Int, item: BangumiCalendarItem) -> Unit) {
             binding.tvTitle.text = item.searchKeyword
 
             // 评分徽章:右上角;>=7 分金色醒目,<7 分半透明低调
@@ -135,18 +135,20 @@ class BangumiCalendarAdapter(
                 }
             }
 
-            // 分集信息:卡片左下角(Bangumi 仅提供总话数 eps,无"已播话数")
-            val eps = item.totalEpisodes
-            if (eps != null && eps > 0) {
-                binding.tvSubtitle.visibility = View.VISIBLE
-                binding.tvSubtitle.text = "${eps}集"
+            // 分集信息:封面左下角(6/12集 或 12集;当季有进度,历史仅总话数)
+            val episodeText = item.episodeText
+            if (episodeText.isNullOrEmpty()) {
+                binding.tvEpisodeText.isVisible = false
             } else {
-                binding.tvSubtitle.isVisible = false
+                binding.tvEpisodeText.isVisible = true
+                binding.tvEpisodeText.text = episodeText
             }
+            binding.tvSubtitle.isVisible = false
 
             ImageLoader.loadInto(binding.ivCover, ImageUrl.poster(item.coverUrl))
             binding.root.setOnClickListener {
-                onClick(item)
+                val pos = bindingAdapterPosition.takeIf { it != RecyclerView.NO_POSITION } ?: return@setOnClickListener
+                onClick(pos, item)
             }
         }
     }
