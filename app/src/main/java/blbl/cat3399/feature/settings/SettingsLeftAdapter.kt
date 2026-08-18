@@ -62,7 +62,7 @@ class SettingsLeftAdapter(
                     ThemeColor.resolve(
                         context = ctx,
                         attr = R.attr.blblAccentContainer,
-                        fallbackRes = R.color.blbl_accent_violet_container,
+                        fallbackRes = R.color.blbl_accent_blue_bright_container,
                     )
                 } else {
                     0x00000000

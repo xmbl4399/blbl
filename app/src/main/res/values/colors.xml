@@ -50,6 +50,11 @@
     <color name="player_button_tint">#FFFFFF</color>
     <color name="blbl_purple">#8A2BE2</color>
     <color name="blbl_blue">#00A1D6</color>
+    <!-- 默认强调色:B站蓝提亮版(比原版 #00A1D6 可视度略高) -->
+    <color name="blbl_accent_blue_bright">#00ADE8</color>
+    <color name="blbl_accent_blue_bright_container">#3300ADE8</color>
+    <color name="blbl_accent_blue_bright_weak">#6600ADE8</color>
+    <color name="blbl_accent_blue_bright_pressed">#8000ADE8</color>
     <color name="player_comment_thread_root_bg">#2600A1D6</color>
     <color name="blbl_red">#FF4D4F</color>
     <!-- Theme accent base (TV Pink preset). Keep it separate from business-label pink. -->

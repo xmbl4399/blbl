@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Application-level fallback theme: Default preset (Dark + Violet accent). -->
+    <!-- Application-level fallback theme: Default preset (Dark + Bilibili blue accent). -->
     <style name="Theme.Blbl" parent="Theme.Blbl.Base.Dark">
-        <item name="blblAccent">@color/blbl_purple</item>
-        <item name="blblAccentContainer">@color/blbl_accent_violet_container</item>
-        <item name="blblAccentWeak">@color/blbl_accent_violet_weak</item>
-        <item name="blblAccentPressed">@color/blbl_accent_violet_pressed</item>
+        <item name="blblAccent">@color/blbl_accent_blue_bright</item>
+        <item name="blblAccentContainer">@color/blbl_accent_blue_bright_container</item>
+        <item name="blblAccentWeak">@color/blbl_accent_blue_bright_weak</item>
+        <item name="blblAccentPressed">@color/blbl_accent_blue_bright_pressed</item>
     </style>
 
     <style name="Theme.Blbl.Base" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Accent (overridden by preset overlay). -->
-        <item name="blblAccent">@color/blbl_purple</item>
-        <item name="blblAccentContainer">@color/blbl_accent_violet_container</item>
-        <item name="blblAccentWeak">@color/blbl_accent_violet_weak</item>
-        <item name="blblAccentPressed">@color/blbl_accent_violet_pressed</item>
+        <item name="blblAccent">@color/blbl_accent_blue_bright</item>
+        <item name="blblAccentContainer">@color/blbl_accent_blue_bright_container</item>
+        <item name="blblAccentWeak">@color/blbl_accent_blue_bright_weak</item>
+        <item name="blblAccentPressed">@color/blbl_accent_blue_bright_pressed</item>
         <item name="blblPageBackdrop">?attr/colorBackground</item>
         <item name="blblDialogSurface">?attr/colorSurface</item>
         <item name="blblOnPageBackdrop">?attr/colorOnSurface</item>

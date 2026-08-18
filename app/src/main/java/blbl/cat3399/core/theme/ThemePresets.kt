@@ -49,7 +49,7 @@ object ThemePresets {
             else ->
                 Spec(
                     baseThemeRes = R.style.Theme_Blbl_Base_Dark,
-                    overlayRes = R.style.ThemeOverlay_Blbl_Accent_Violet,
+                    overlayRes = R.style.ThemeOverlay_Blbl_Accent_Blue,
                 )
         }
     }

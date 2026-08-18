@@ -17,6 +17,14 @@
         <item name="blblAccentPressed">@color/blbl_accent_violet_pressed</item>
     </style>
 
+    <!-- 默认 preset 强调色:B站蓝提亮版(比原版 #00A1D6 可视度略高) -->
+    <style name="ThemeOverlay.Blbl.Accent.Blue" parent="ThemeOverlay.MaterialComponents">
+        <item name="blblAccent">@color/blbl_accent_blue_bright</item>
+        <item name="blblAccentContainer">@color/blbl_accent_blue_bright_container</item>
+        <item name="blblAccentWeak">@color/blbl_accent_blue_bright_weak</item>
+        <item name="blblAccentPressed">@color/blbl_accent_blue_bright_pressed</item>
+    </style>
+
     <style name="ThemeOverlay.Blbl.Accent.TvPink" parent="ThemeOverlay.MaterialComponents">
         <item name="blblAccent">@color/blbl_accent_tv_pink</item>
         <item name="blblAccentContainer">@color/blbl_accent_tv_pink_container</item>
