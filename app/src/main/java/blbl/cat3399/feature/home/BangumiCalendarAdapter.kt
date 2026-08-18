@@ -1,9 +1,11 @@
 package blbl.cat3399.feature.home
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
+import blbl.cat3399.R
 import blbl.cat3399.core.image.ImageLoader
 import blbl.cat3399.core.image.ImageUrl
 import blbl.cat3399.core.model.BangumiCalendarDay
@@ -11,6 +13,7 @@ import blbl.cat3399.core.model.BangumiCalendarItem
 import blbl.cat3399.core.ui.cloneInUserScale
 import blbl.cat3399.databinding.ItemBangumiCalendarHeaderBinding
 import blbl.cat3399.databinding.ItemBangumiFollowBinding
+import java.util.Locale
 
 /**
  * Bangumi 星期视图多类型适配器:
@@ -100,17 +103,40 @@ class BangumiCalendarAdapter(
     class CardVh(private val binding: ItemBangumiFollowBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: BangumiCalendarItem, onClick: (BangumiCalendarItem) -> Unit) {
             binding.tvTitle.text = item.searchKeyword
-            binding.tvAccessBadgeText.isVisible = false
 
-            val metaParts =
-                buildList {
-                    item.airDate?.takeIf { it.length >= 10 }?.let { add("放送 ${it.substring(5)}") }
-                    item.score?.let { add("评分 ${"%.1f".format(it)}") }
-                    item.rank?.let { add("No.${it}") }
+            // 评分徽章:右上角;>=7 分金色醒目,<7 分半透明低调
+            val score = item.score
+            if (score != null) {
+                binding.tvAccessBadgeText.visibility = View.VISIBLE
+                binding.tvAccessBadgeText.text = String.format(Locale.US, "%.1f", score)
+                binding.tvAccessBadgeText.setBackgroundResource(
+                    if (score >= 7.0) R.drawable.bg_score_badge_highlight else R.drawable.bg_score_badge_normal,
+                )
+            } else {
+                binding.tvAccessBadgeText.visibility = View.GONE
+            }
+
+            // 流派标签:左上角,最多 2 个
+            val tags = item.tags
+            if (tags.isEmpty()) {
+                binding.llTags.visibility = View.GONE
+                binding.tvTag1.visibility = View.GONE
+                binding.tvTag2.visibility = View.GONE
+            } else {
+                binding.llTags.visibility = View.VISIBLE
+                binding.tvTag1.visibility = View.VISIBLE
+                binding.tvTag1.text = tags.getOrNull(0).orEmpty()
+                val tag2 = tags.getOrNull(1)
+                if (tag2.isNullOrEmpty()) {
+                    binding.tvTag2.visibility = View.GONE
+                } else {
+                    binding.tvTag2.visibility = View.VISIBLE
+                    binding.tvTag2.text = tag2
                 }
-            val subtitle = metaParts.joinToString(" · ")
-            binding.tvSubtitle.text = subtitle
-            binding.tvSubtitle.isVisible = subtitle.isNotBlank()
+            }
+
+            // 番剧名称下方的放送时间/评分/编号已移除
+            binding.tvSubtitle.isVisible = false
 
             ImageLoader.loadInto(binding.ivCover, ImageUrl.poster(item.coverUrl))
             binding.root.setOnClickListener {

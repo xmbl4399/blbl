@@ -5,9 +5,9 @@ package blbl.cat3399.core.model
  * 数据源:GET https://api.bgm.tv/calendar,按周一~周日分组返回当季放送番剧。
  */
 data class BangumiCalendarDay(
-    /** 星期编号 1=周一 ... 7=周日 */
+    /** 星期编号 1=周一 ... 7=周日;历史季度列表视图时为 0 */
     val weekdayId: Int,
-    /** 中文星期名(如"周一") */
+    /** 中文星期名(如"周一");历史季度为季度标题 */
     val weekdayCn: String,
     val items: List<BangumiCalendarItem>,
 )
@@ -27,6 +27,8 @@ data class BangumiCalendarItem(
     /** 排名,无排名时为 null */
     val rank: Int?,
     val summary: String?,
+    /** 流派标签(已按常见番剧分类白名单过滤,最多 2 个) */
+    val tags: List<String>,
 ) {
     /** 用于 B站搜索的名称:优先中文译名,无则用原始标题 */
     val searchKeyword: String

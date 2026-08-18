@@ -55,5 +55,7 @@
     <!-- Theme accent base (TV Pink preset). Keep it separate from business-label pink. -->
     <color name="blbl_accent_tv_pink">#FB7299</color>
     <color name="blbl_pink">#FB7299</color>
+    <!-- Bangumi 评分高亮金色(>=7 分醒目显示) -->
+    <color name="blbl_gold">#E8A33D</color>
     <color name="player_overlay_bg">#80000000</color>
 </resources>

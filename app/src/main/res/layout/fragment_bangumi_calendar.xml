@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/blblPageBackdrop"
+    android:orientation="vertical">
+
+    <!-- 年份切换栏 -->
+    <blbl.cat3399.core.ui.UserScaleTabLayout
+        android:id="@+id/tab_year"
+        style="@style/Widget.Blbl.TabLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        android:focusable="false"
+        app:tabMode="scrollable" />
+
+    <!-- 季度切换栏(冬/春/夏/秋) -->
+    <blbl.cat3399.core.ui.UserScaleTabLayout
+        android:id="@+id/tab_season"
+        style="@style/Widget.Blbl.TabLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        android:focusable="false"
+        app:tabMode="scrollable" />
+
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipe_refresh"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="?attr/blblContentBackground">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recycler"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:focusable="true"
+            android:padding="8dp" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+</LinearLayout>
