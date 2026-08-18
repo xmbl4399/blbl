@@ -131,8 +131,8 @@ object BangumiApi {
      * 缓存:当季 12h(每周看一次),历史季度 30 天(放送进度固定不变)。
      */
     suspend fun browseQuarter(year: Int, quarterMonth: Int): List<BangumiCalendarItem> {
-        // v3:修复季度次月跨季 bug(春 4月 误拉 7月);旧 v2 缓存含跨季数据,加后缀强制重建
-        val cacheName = "browse_${year}_${quarterMonth}_v3.json"
+        // v4:cat=1 只拉 TV 番剧(排除剧场版/WEB/OVA);只拉季度首月(1/4/7/10)
+        val cacheName = "browse_${year}_${quarterMonth}_v4.json"
         val isCurrent = SeasonSpec.current().let { it.year == year && it.month == quarterMonth }
         val cacheAge = if (isCurrent) QUARTER_CACHE_AGE_MS else QUARTER_CACHE_AGE_MS_HISTORY
         val cachedRaw = readCache(cacheName)
@@ -155,22 +155,20 @@ object BangumiApi {
             // 这样封面/评分/tag 从缓存解析与在线结果相同
             val rawItems = JSONArray()
             val seen = HashSet<Long>()
-            // 季度覆盖首月+次月(不跨季):冬1+2 / 春4+5 / 夏7+8 / 秋10+11
-            val months = listOf(quarterMonth, quarterMonth + 1)
-            for (m in months) {
-                var offset = 0
-                while (true) {
-                    val root = JSONObject(fetch("$BASE/v0/subjects?type=2&year=$year&month=$m&limit=100&sort=rank&offset=$offset"))
-                    val data = root.optJSONArray("data") ?: JSONArray()
-                    for (i in 0 until data.length()) {
-                        val obj = data.getJSONObject(i)
-                        val id = obj.optLong("id", 0L)
-                        if (seen.add(id)) rawItems.put(obj)
-                    }
-                    if (data.length() < 100) break
-                    offset += 100
-                    if (offset > 500) break // 防死循环
+            // 只拉季度首月(1/4/7/10);cat=1 仅 TV 番剧,过滤剧场版/WEB/OVA
+            // (实测 2026-07 68 -> 60 条;不再合并次月,避免剧场版混入)
+            var offset = 0
+            while (true) {
+                val root = JSONObject(fetch("$BASE/v0/subjects?type=2&cat=1&year=$year&month=$quarterMonth&limit=100&sort=rank&offset=$offset"))
+                val data = root.optJSONArray("data") ?: JSONArray()
+                for (i in 0 until data.length()) {
+                    val obj = data.getJSONObject(i)
+                    val id = obj.optLong("id", 0L)
+                    if (seen.add(id)) rawItems.put(obj)
                 }
+                if (data.length() < 100) break
+                offset += 100
+                if (offset > 500) break // 防死循环
             }
             writeCache(cacheName, rawItems.toString())
             withContext(Dispatchers.Default) { parseItems(rawItems) }
