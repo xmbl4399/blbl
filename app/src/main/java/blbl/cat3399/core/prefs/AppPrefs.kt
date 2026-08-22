@@ -599,7 +599,7 @@ class AppPrefs(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY, value).apply()
 
     var fullscreenEnabled: Boolean
-        get() = prefs.getBoolean(KEY_FULLSCREEN, true)
+        get() = prefs.getBoolean(KEY_FULLSCREEN, false)
         set(value) = prefs.edit().putBoolean(KEY_FULLSCREEN, value).apply()
 
     var avoidDisplayCutout: Boolean
