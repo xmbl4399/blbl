@@ -390,11 +390,10 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                     adapter.submit(ArrayList(days))
                 }
 
-                // 1) 已缓存月先显示(秒出,不阻塞)
+                // 1) 已缓存月先显示(纯缓存读,秒出;不触发网络)
                 for (m in months) {
                     if (token != requestToken) return@launch
-                    val cached = runCatching { BangumiApi.browseYearMonth(mode.type, mode.cat, year, m) }.getOrNull()
-                    if (token != requestToken) return@launch
+                    val cached = BangumiApi.cachedYearMonth(mode.type, mode.cat, year, m)
                     if (cached != null && cached.isNotEmpty()) {
                         days += BangumiCalendarDay(m, "${m}月", cached, "${m}月 · ${cached.size} 部")
                     }
