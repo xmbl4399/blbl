@@ -121,12 +121,26 @@ object BangumiApi {
                 offset += 100
                 if (offset > 500) break
             }
-            // 月内按热度(rank)排序:rank 升序在前,无排名(rank=-1)排最后
+            // 排序:
+            // - type=2(动画):按 rank(热度排名,77% 条目有排名,语义正确)
+            // - type=6(三次元):rank 缺失率高(日剧仅 4% 有排名)→ 改按评分排序,
+            //   评分人数 >=10 的按 score 降序(避免 1 人评分噪音),其余(无评分/人数少)按日期垫底
             val sorted = JSONArray().apply {
-                (0 until rawItems.length())
-                    .map { rawItems.getJSONObject(it) }
-                    .sortedBy { obj -> obj.optInt("rank", Int.MAX_VALUE) }
-                    .forEach { put(it) }
+                val list = (0 until rawItems.length()).map { rawItems.getJSONObject(it) }
+                val ordered =
+                    if (type == 2) {
+                        list.sortedBy { obj -> obj.optInt("rank", Int.MAX_VALUE) }
+                    } else {
+                        list.sortedWith(
+                            compareByDescending<JSONObject> { obj ->
+                                val rating = obj.optJSONObject("rating")
+                                val total = rating?.optInt("total", 0) ?: 0
+                                val score = rating?.optDouble("score", 0.0) ?: 0.0
+                                if (total >= 10 && score > 0) score else -1.0
+                            }.thenBy { obj -> obj.optString("date").orEmpty() },
+                        )
+                    }
+                ordered.forEach { put(it) }
             }
             writeCache(cacheName, sorted.toString())
             withContext(Dispatchers.Default) { parseItems(sorted) }

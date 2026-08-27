@@ -281,6 +281,8 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 fun submitCurrent() {
                     if (days.isEmpty()) return
                     adapter.submit(ArrayList(days))
+                    // 拿到第一批数据(缓存月或首个网络月)即停刷新转圈,后续月份静默追加
+                    if (token == requestToken) _binding?.swipeRefresh?.isRefreshing = false
                 }
 
                 // 1) 已缓存月先显示(纯缓存读,秒出;不触发网络)
