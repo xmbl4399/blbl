@@ -35,7 +35,6 @@ object BangumiApi {
     private const val USER_AGENT = "blbl/0.1 (https://github.com/xmbl4399/blbl; bangumi calendar)"
     private const val QUARTER_CACHE_AGE_MS = 12 * 60 * 60 * 1000L
     private const val QUARTER_CACHE_AGE_MS_HISTORY = 30L * 24 * 60 * 60 * 1000L // 历史季度 30 天
-    private const val PROGRESS_CACHE_AGE_MS = 24 * 60 * 60 * 1000L // 当季进度每日刷新
 
     private lateinit var cacheDir: File
 
@@ -185,18 +184,23 @@ object BangumiApi {
      * 当季剧集进度:对当季每部番 GET /v0/episodes?subject_id=&type=0,
      * 统计 airdate <= 今天的话数(已放送话数)。每日缓存刷新。
      * 历史季度无需(放送结束,进度固定)。
+     *
+     * 拆分两个方法支持"先显缓存、后台刷新"策略:
+     * - [cachedSeasonProgress]:同步读缓存,不过期检查,立即返回(无缓存返回空 map)
+     * - [refreshSeasonProgress]:强制网络拉取 + 写缓存(suspend,约 10s)
      */
-    suspend fun currentSeasonProgress(): Map<Long, Int> {
+    fun cachedSeasonProgress(): Map<Long, Int> {
         val spec = SeasonSpec.current()
-        // 缓存按季度键隔离(换季后不会用到旧季度进度)
         val cacheName = "progress_${spec.year}_${spec.month}.json"
-        val cached = readCache(cacheName)
-        if (cached != null && cacheAgeMs(cacheName) < PROGRESS_CACHE_AGE_MS) {
-            AppLog.i(TAG, "progress served from cache")
-            return parseProgressMap(cached)
-        }
+        val cached = readCache(cacheName) ?: return emptyMap()
+        return parseProgressMap(cached)
+    }
+
+    suspend fun refreshSeasonProgress(): Map<Long, Int> {
+        val spec = SeasonSpec.current()
+        val cacheName = "progress_${spec.year}_${spec.month}.json"
         val ids = runCatching { browseQuarter(spec.year, spec.month).map { it.id } }.getOrDefault(emptyList())
-        AppLog.i(TAG, "fetch progress for ${ids.size} subjects (current quarter)")
+        AppLog.i(TAG, "refresh progress for ${ids.size} subjects (current quarter)")
         val map = HashMap<Long, Int>(ids.size)
         // 分批并发,避免瞬时打满接口
         coroutineScope {

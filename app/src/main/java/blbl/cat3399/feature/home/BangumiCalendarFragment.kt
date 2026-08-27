@@ -264,18 +264,32 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = items)))
                 AppLog.i("BangumiCalendar", "load ok spec=${spec.label} cards=${items.size}")
 
-                // 当季:合并已放送话数(每日缓存,首次拉取较慢,列表先显示总话数)
+                // 当季:先显缓存进度(秒出),再后台强制刷新(约 10s),刷新完自动合并更新
                 if (isCurrent && token == requestToken) {
-                    val progress = BangumiApi.currentSeasonProgress()
+                    val mergeProgress = { progress: Map<Long, Int> ->
+                        if (progress.isNotEmpty()) {
+                            val merged =
+                                items.map { item ->
+                                    val aired = progress[item.id]
+                                    if (aired != null && aired > 0) item.copy(airedEpisodes = aired) else item
+                                }
+                            adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = merged)))
+                            AppLog.i("BangumiCalendar", "progress merged count=${progress.size}")
+                        }
+                    }
+                    // 1) 缓存即时读:不过期检查,进入页面立即显示上次进度
+                    val cached = BangumiApi.cachedSeasonProgress()
                     if (token != requestToken) return@launch
-                    if (progress.isNotEmpty()) {
-                        val merged =
-                            items.map { item ->
-                                val aired = progress[item.id]
-                                if (aired != null && aired > 0) item.copy(airedEpisodes = aired) else item
-                            }
-                        adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = merged)))
-                        AppLog.i("BangumiCalendar", "progress merged count=${progress.size}")
+                    mergeProgress(cached)
+                    // 2) 后台刷新:不阻塞 UI,完成后 token 未变则更新
+                    launch {
+                        try {
+                            val fresh = BangumiApi.refreshSeasonProgress()
+                            if (token == requestToken) mergeProgress(fresh)
+                        } catch (t: Throwable) {
+                            if (t is CancellationException) throw t
+                            AppLog.w("BangumiCalendar", "progress refresh failed, keep cached", t)
+                        }
                     }
                 }
 
