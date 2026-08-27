@@ -92,7 +92,12 @@ class AppPrefs(context: Context) {
         }
 
     var mainHomeVisibleTabs: List<String>
-        get() = loadStringList(KEY_MAIN_HOME_VISIBLE_TABS)
+        get() {
+            // 二改默认:推荐/热门/季度动画/剧场动画/日剧/电影 6 项显示,源 app 的"番剧/影视"默认隐藏(可在设置手动勾回)
+            val saved = loadStringList(KEY_MAIN_HOME_VISIBLE_TABS)
+            if (saved.isNotEmpty()) return saved
+            return DEFAULT_HOME_VISIBLE_TABS
+        }
         set(value) = saveStringList(KEY_MAIN_HOME_VISIBLE_TABS, normalizeStringList(value))
 
     var mainCategoryVisibleTabs: List<String>
@@ -1066,6 +1071,17 @@ class AppPrefs(context: Context) {
         private const val KEY_STARTUP_PAGE = "startup_page"
         private const val KEY_CUSTOM_PAGE_CONFIG = "custom_page_config"
         private const val KEY_MAIN_HOME_VISIBLE_TABS = "main_home_visible_tabs"
+
+        /** 二改默认主页 tab:推荐/热门/季度动画/剧场动画/日剧/电影(源 app 的"番剧/影视"默认隐藏) */
+        private val DEFAULT_HOME_VISIBLE_TABS =
+            listOf(
+                "recommend",
+                "popular",
+                "bangumi_calendar",
+                "anime_movie",
+                "drama",
+                "movie",
+            )
         private const val KEY_MAIN_CATEGORY_VISIBLE_TABS = "main_category_visible_tabs"
         private const val KEY_MAIN_LIVE_VISIBLE_TABS = "main_live_visible_tabs"
         private const val KEY_MAIN_MY_VISIBLE_TABS = "main_my_visible_tabs"

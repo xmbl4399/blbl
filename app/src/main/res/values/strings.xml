@@ -6,7 +6,10 @@
     <string name="tab_bangumi">番剧</string>
     <string name="tab_cinema">影视</string>
     <string name="tab_popular">热门</string>
-    <string name="tab_bangumi_calendar">新番表</string>
+    <string name="tab_bangumi_calendar">季度动画</string>
+    <string name="tab_anime_movie">剧场动画</string>
+    <string name="tab_drama">日剧</string>
+    <string name="tab_movie">电影</string>
     <string name="tab_search">搜索</string>
     <string name="tab_category">分类</string>
     <string name="tab_dynamic">动态</string>

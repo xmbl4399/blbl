@@ -22,6 +22,8 @@ import java.util.Locale
  */
 class BangumiCalendarAdapter(
     private val onClick: (position: Int, item: BangumiCalendarItem) -> Unit,
+    /** 是否显示分集信息(季度动画/日剧 true;剧场动画/电影 false) */
+    private val showEpisodeText: Boolean = true,
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private sealed interface Row {
@@ -75,7 +77,7 @@ class BangumiCalendarAdapter(
         val inflater = LayoutInflater.from(parent.context).cloneInUserScale(parent.context)
         return when (viewType) {
             TYPE_HEADER -> HeaderVh(ItemBangumiCalendarHeaderBinding.inflate(inflater, parent, false))
-            else -> CardVh(ItemBangumiFollowBinding.inflate(inflater, parent, false))
+            else -> CardVh(ItemBangumiFollowBinding.inflate(inflater, parent, false), showEpisodeText)
         }
     }
 
@@ -90,17 +92,25 @@ class BangumiCalendarAdapter(
 
     class HeaderVh(private val binding: ItemBangumiCalendarHeaderBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(day: BangumiCalendarDay) {
-            // 只显示统计信息(季度名已移除):"68 部 · 放送 07-04 起"
-            val meta = buildList {
-                add("${day.items.size} 部")
-                day.items.firstOrNull()?.airDate?.takeIf { it.length >= 10 }?.let { add("放送 ${it.substring(5)} 起") }
-            }.joinToString(" · ")
+            // 年份模式:自定义 header(如 "2026 年 12 部");季度模式:默认统计 "68 部 · 放送 07-04 起"
+            val meta =
+                if (!day.headerTextOverride.isNullOrBlank()) {
+                    day.headerTextOverride
+                } else {
+                    buildList {
+                        add("${day.items.size} 部")
+                        day.items.firstOrNull()?.airDate?.takeIf { it.length >= 10 }?.let { add("放送 ${it.substring(5)} 起") }
+                    }.joinToString(" · ")
+                }
             binding.tvMeta.text = meta
             binding.tvMeta.isVisible = meta.isNotBlank()
         }
     }
 
-    class CardVh(private val binding: ItemBangumiFollowBinding) : RecyclerView.ViewHolder(binding.root) {
+    class CardVh(
+        private val binding: ItemBangumiFollowBinding,
+        private val showEpisodeText: Boolean,
+    ) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: BangumiCalendarItem, onClick: (position: Int, item: BangumiCalendarItem) -> Unit) {
             binding.tvTitle.text = item.searchKeyword
 
@@ -135,13 +145,17 @@ class BangumiCalendarAdapter(
                 }
             }
 
-            // 分集信息:封面左下角(6/12集 或 12集;当季有进度,历史仅总话数)
-            val episodeText = item.episodeText
-            if (episodeText.isNullOrEmpty()) {
-                binding.tvEpisodeText.isVisible = false
+            // 分集信息:封面左下角(6/12集 或 12集;当季有进度,历史仅总话数;剧场动画/电影不显示)
+            if (showEpisodeText) {
+                val episodeText = item.episodeText
+                if (episodeText.isNullOrEmpty()) {
+                    binding.tvEpisodeText.isVisible = false
+                } else {
+                    binding.tvEpisodeText.isVisible = true
+                    binding.tvEpisodeText.text = episodeText
+                }
             } else {
-                binding.tvEpisodeText.isVisible = true
-                binding.tvEpisodeText.text = episodeText
+                binding.tvEpisodeText.isVisible = false
             }
             binding.tvSubtitle.isVisible = false
 

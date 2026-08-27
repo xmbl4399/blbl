@@ -181,6 +181,92 @@ object BangumiApi {
     }
 
     /**
+     * 指定年份 + 分类的条目(全年拉取,按热度排序)。
+     * 用于"剧场动画(type=2 cat=3)/日剧(type=6 cat=1)/电影(type=6 cat=6002)"年份页面。
+     *
+     * 注意:API 的 year 单参数语义不可靠(实测日剧 2026 仅回 7 部,而逐月求和 305 部),
+     * 因此采用**并集策略**:year 单参数 ∪ 12 个月逐月(year+month,当月开播语义已验证可靠),
+     * 按 id 去重,保证当年条目完整。
+     * 缓存:当年 12h,历史年份 30 天。
+     */
+    suspend fun browseYear(type: Int, cat: Int, year: Int): List<BangumiCalendarItem> {
+        // v2:并集策略(year 单参数 + 逐月)修复数量不全,缓存键加后缀强制重建
+        val cacheName = "browse_${type}_${cat}_${year}_v2.json"
+        val isCurrentYear = Calendar.getInstance().get(Calendar.YEAR) == year
+        val cacheAge = if (isCurrentYear) QUARTER_CACHE_AGE_MS else QUARTER_CACHE_AGE_MS_HISTORY
+        val cachedRaw = readCache(cacheName)
+        if (cachedRaw != null && cacheAgeMs(cacheName) < cacheAge) {
+            AppLog.i(TAG, "browseYear type=$type cat=$cat $year served from cache")
+            return runCatching { withContext(Dispatchers.Default) { parseItems(JSONArray(cachedRaw!!)) } }
+                .getOrElse { fetchYear(type, cat, year, cacheName, fallbackRaw = cachedRaw) }
+        }
+        return fetchYear(type, cat, year, cacheName, fallbackRaw = cachedRaw)
+    }
+
+    private suspend fun fetchYear(
+        type: Int,
+        cat: Int,
+        year: Int,
+        cacheName: String,
+        fallbackRaw: String?,
+    ): List<BangumiCalendarItem> {
+        return try {
+            val rawItems = JSONArray()
+            val seen = HashSet<Long>()
+
+            // 1) year 单参数(电影等分类可返回全年全集)
+            var offset = 0
+            while (true) {
+                val url = "$BASE/v0/subjects?type=$type&cat=$cat&year=$year&limit=100&sort=rank&offset=$offset"
+                val root = JSONObject(fetch(url))
+                val data = root.optJSONArray("data") ?: JSONArray()
+                for (i in 0 until data.length()) {
+                    val obj = data.getJSONObject(i)
+                    val id = obj.optLong("id", 0L)
+                    if (seen.add(id)) rawItems.put(obj)
+                }
+                if (data.length() < 100) break
+                offset += 100
+                if (offset > 1000) break
+            }
+            // 2) 逐月 1-12 月(year+month 语义可靠,日剧等分类的完整数据来源)
+            // ⚠️ 不能带 sort=rank:type=6(三次元)下 rank+month 组合有 API bug(实测只回 1 条),
+            //    动画 type=2 不受影响;这里用默认 date 排序拿全数据,最后统一按 rank 重排
+            for (month in 1..12) {
+                var mOffset = 0
+                while (true) {
+                    val url = "$BASE/v0/subjects?type=$type&cat=$cat&year=$year&month=$month&limit=100&offset=$mOffset"
+                    val root = JSONObject(fetch(url))
+                    val data = root.optJSONArray("data") ?: JSONArray()
+                    for (i in 0 until data.length()) {
+                        val obj = data.getJSONObject(i)
+                        val id = obj.optLong("id", 0L)
+                        if (seen.add(id)) rawItems.put(obj)
+                    }
+                    if (data.length() < 100) break
+                    mOffset += 100
+                    if (mOffset > 1000) break
+                }
+            }
+            // 合并后按热度(rank)排序:rank 升序在前,无排名(rank=-1)排最后
+            val sorted = JSONArray().apply {
+                (0 until rawItems.length())
+                    .map { rawItems.getJSONObject(it) }
+                    .sortedBy { obj -> obj.optInt("rank", Int.MAX_VALUE) }
+                    .forEach { put(it) }
+            }
+            writeCache(cacheName, sorted.toString())
+            withContext(Dispatchers.Default) { parseItems(sorted) }
+        } catch (t: Throwable) {
+            if (fallbackRaw != null) {
+                AppLog.w(TAG, "browseYear type=$type cat=$cat $year fetch failed, fallback to stale cache", t)
+                return withContext(Dispatchers.Default) { parseItems(JSONArray(fallbackRaw)) }
+            }
+            throw t
+        }
+    }
+
+    /**
      * 当季剧集进度:对当季每部番 GET /v0/episodes?subject_id=&type=0,
      * 统计 airdate <= 今天的话数(已放送话数)。每日缓存刷新。
      * 历史季度无需(放送结束,进度固定)。
@@ -191,16 +277,32 @@ object BangumiApi {
      */
     fun cachedSeasonProgress(): Map<Long, Int> {
         val spec = SeasonSpec.current()
-        val cacheName = "progress_${spec.year}_${spec.month}.json"
-        val cached = readCache(cacheName) ?: return emptyMap()
-        return parseProgressMap(cached)
+        return cachedProgressFor("${spec.year}_${spec.month}")
     }
 
     suspend fun refreshSeasonProgress(): Map<Long, Int> {
         val spec = SeasonSpec.current()
-        val cacheName = "progress_${spec.year}_${spec.month}.json"
         val ids = runCatching { browseQuarter(spec.year, spec.month).map { it.id } }.getOrDefault(emptyList())
-        AppLog.i(TAG, "refresh progress for ${ids.size} subjects (current quarter)")
+        return refreshProgressFor("${spec.year}_${spec.month}", ids)
+    }
+
+    /** 日剧年份页进度(仅当年有效):已放送话数,缓存键按年隔离 */
+    fun cachedDramaProgress(year: Int): Map<Long, Int> = cachedProgressFor("drama_$year")
+
+    suspend fun refreshDramaProgress(year: Int): Map<Long, Int> {
+        val ids = runCatching { browseYear(6, 1, year).map { it.id } }.getOrDefault(emptyList())
+        return refreshProgressFor("drama_$year", ids)
+    }
+
+    private fun cachedProgressFor(keyPrefix: String): Map<Long, Int> {
+        val cacheName = "progress_$keyPrefix.json"
+        val cached = readCache(cacheName) ?: return emptyMap()
+        return parseProgressMap(cached)
+    }
+
+    private suspend fun refreshProgressFor(keyPrefix: String, ids: List<Long>): Map<Long, Int> {
+        val cacheName = "progress_$keyPrefix.json"
+        AppLog.i(TAG, "refresh progress $keyPrefix for ${ids.size} subjects")
         val map = HashMap<Long, Int>(ids.size)
         // 分批并发,避免瞬时打满接口
         coroutineScope {
@@ -294,6 +396,7 @@ object BangumiApi {
             rank = it.optInt("rank", -1).takeIf { r -> r > 0 },
             summary = it.optString("summary").orEmpty().takeIf { s -> s.isNotBlank() },
             tags = parseTags(it.optJSONArray("tags")),
+            metaTags = parseStringArray(it.optJSONArray("meta_tags")),
             totalEpisodes = it.optInt("eps", 0).takeIf { e -> e > 0 },
             airedEpisodes = it.optInt("aired", 0).takeIf { a -> a > 0 }, // 缓存序列化用
         )
@@ -307,6 +410,17 @@ object BangumiApi {
             val name = tags.optJSONObject(i)?.optString("name").orEmpty().trim()
             if (name in TAG_WHITELIST) out += name
             if (out.size >= 2) break
+        }
+        return out
+    }
+
+    /** 解析字符串数组(meta_tags 等原始文本数组) */
+    private fun parseStringArray(arr: JSONArray?): List<String> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            val s = arr.optString(i).orEmpty().trim()
+            if (s.isNotEmpty()) out += s
         }
         return out
     }

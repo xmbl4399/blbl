@@ -30,6 +30,7 @@ import blbl.cat3399.ui.MainActivity
 import blbl.cat3399.ui.RefreshKeyHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.util.Calendar
 
 /**
  * 首页「新番表」栏:各季度番剧星期视图(按周一~周日分组的时间表)。
@@ -50,7 +51,12 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     private var requestToken: Int = 0
     private var initialLoadTriggered: Boolean = false
 
+    /** 浏览模式(由 HomeTabs 传入):季度动画 / 剧场动画 / 日剧 / 电影 */
+    private val mode: BangumiCalendarMode
+        get() = BangumiCalendarMode.valueOf(requireArguments().getString(ARG_MODE, BangumiCalendarMode.QUARTER_ANIME.name))
+
     private var selectedSpec: BangumiApi.SeasonSpec = BangumiApi.SeasonSpec.current()
+    private var selectedYear: Int = Calendar.getInstance().get(Calendar.YEAR)
     private var seasonBarReady: Boolean = false
 
     private var pendingFocusFirstCardAfterRefresh: Boolean = false
@@ -70,9 +76,11 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         if (!::adapter.isInitialized) {
             adapter =
-                BangumiCalendarAdapter { position, item ->
-                    openSearchFor(position, item)
-                }
+                BangumiCalendarAdapter(
+                    onClick = { position, item -> openSearchFor(position, item) },
+                    // 剧场动画/电影不显示集数;季度动画/日剧显示
+                    showEpisodeText = mode == BangumiCalendarMode.QUARTER_ANIME || mode == BangumiCalendarMode.DRAMA,
+                )
         }
 
         binding.recycler.adapter = adapter
@@ -137,9 +145,14 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     // D-pad:方向键在季度间移动焦点(不切换),按 OK/确认键才加载所选季度;
     // 鼠标/触控点击 tab 直接切换。
 
-    // 全部季度:2000 冬 至当前季(TabLayout scrollable 全量 view,约 107 个,开销可忽略)
+    // 全部季度:2006 冬 至当前季(TabLayout scrollable 全量 view,约 107 个,开销可忽略)
     private val quarters: List<BangumiApi.SeasonSpec> by lazy {
         BangumiApi.SeasonSpec.recentQuarters(BangumiApi.SeasonSpec.quarterCountSince(QUARTER_START_YEAR))
+    }
+
+    // 年份粒度(剧场动画/日剧/电影):当前年 ~ 2006
+    private val years: List<Int> by lazy {
+        (Calendar.getInstance().get(Calendar.YEAR) downTo QUARTER_START_YEAR).toList()
     }
 
     private fun setupSeasonBar() {
@@ -147,8 +160,16 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
             object : TabLayout.OnTabSelectedListener {
                 override fun onTabSelected(tab: TabLayout.Tab) {
                     if (!seasonBarReady) return
-                    val spec = quarters.getOrNull(tab.position) ?: return
-                    selectSpecIfChanged(spec)
+                    when (mode.granularity) {
+                        BangumiCalendarMode.Granularity.QUARTER -> {
+                            val spec = quarters.getOrNull(tab.position) ?: return
+                            selectSpecIfChanged(spec)
+                        }
+                        BangumiCalendarMode.Granularity.YEAR -> {
+                            val year = years.getOrNull(tab.position) ?: return
+                            selectYearIfChanged(year)
+                        }
+                    }
                 }
 
                 override fun onTabUnselected(tab: TabLayout.Tab) = Unit
@@ -156,7 +177,12 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
             },
         )
 
-        quarters.forEach { q -> binding.tabQuarter.addTab(binding.tabQuarter.newTab().setText(q.label)) }
+        val barItems =
+            when (mode.granularity) {
+                BangumiCalendarMode.Granularity.QUARTER -> quarters.map { it.label }
+                BangumiCalendarMode.Granularity.YEAR -> years.map { it.toString() }
+            }
+        barItems.forEach { label -> binding.tabQuarter.addTab(binding.tabQuarter.newTab().setText(label)) }
 
         // 焦点移动不选中(selectOnFocus=false),仅 OK/点击时才 select
         binding.tabQuarter.enableDpadTabFocus(selectOnFocus = false) { position ->
@@ -195,6 +221,16 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
         AppLog.d("BangumiCalendar", "switch season ${selectedSpec.label} -> ${spec.label}")
         selectedSpec = spec
         // 加载完成后把焦点从季度栏带回卡片区
+        pendingFocusFirstCardFromTab = true
+        pendingFocusFirstCardFromContentSwitch = false
+        pendingFocusFirstCardFromBackToTab0 = false
+        resetAndLoad(fromUserRefresh = false)
+    }
+
+    private fun selectYearIfChanged(year: Int) {
+        if (year == selectedYear) return
+        AppLog.d("BangumiCalendar", "switch year $selectedYear -> $year")
+        selectedYear = year
         pendingFocusFirstCardFromTab = true
         pendingFocusFirstCardFromContentSwitch = false
         pendingFocusFirstCardFromBackToTab0 = false
@@ -254,18 +290,38 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
 
     private fun loadSeason(isRefresh: Boolean = false) {
         val token = requestToken
-        val spec = selectedSpec
-        val isCurrent = spec == BangumiApi.SeasonSpec.current()
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                // 统一列表视图:当年/历史季度均为该季开播新番(网页 airtime/yyyy-m 语义)
-                val items = BangumiApi.browseQuarter(spec.year, spec.month)
+                // 统一列表视图:季度模式 = 该季开播新番;年份模式 = 该年全部该类条目(热度排序)
+                val items: List<BangumiCalendarItem>
+                val title: String
+                val headerOverride: String?
+                when (mode.granularity) {
+                    BangumiCalendarMode.Granularity.QUARTER -> {
+                        val spec = selectedSpec
+                        items = BangumiApi.browseQuarter(spec.year, spec.month)
+                        title = spec.label
+                        headerOverride = null
+                    }
+                    BangumiCalendarMode.Granularity.YEAR -> {
+                        val year = selectedYear
+                        items = BangumiApi.browseYear(mode.type, mode.cat, year)
+                        title = year.toString()
+                        headerOverride = "${year} 年 ${items.size} 部"
+                    }
+                }
                 if (token != requestToken) return@launch
-                adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = items)))
-                AppLog.i("BangumiCalendar", "load ok spec=${spec.label} cards=${items.size}")
+                adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = title, items = items, headerTextOverride = headerOverride)))
+                AppLog.i("BangumiCalendar", "load ok mode=${mode.name} title=$title cards=${items.size}")
 
-                // 当季:先显缓存进度(秒出),再后台强制刷新(约 10s),刷新完自动合并更新
-                if (isCurrent && token == requestToken) {
+                // 进度(先显缓存后台刷新):仅 当季动画 与 当年日剧 需要
+                val progressNeeded =
+                    when {
+                        mode == BangumiCalendarMode.QUARTER_ANIME && selectedSpec == BangumiApi.SeasonSpec.current() -> true
+                        mode == BangumiCalendarMode.DRAMA && selectedYear == Calendar.getInstance().get(Calendar.YEAR) -> true
+                        else -> false
+                    }
+                if (progressNeeded && token == requestToken) {
                     val mergeProgress = { progress: Map<Long, Int> ->
                         if (progress.isNotEmpty()) {
                             val merged =
@@ -273,18 +329,26 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                                     val aired = progress[item.id]
                                     if (aired != null && aired > 0) item.copy(airedEpisodes = aired) else item
                                 }
-                            adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = spec.label, items = merged)))
+                            adapter.submit(listOf(BangumiCalendarDay(weekdayId = 0, weekdayCn = title, items = merged, headerTextOverride = headerOverride)))
                             AppLog.i("BangumiCalendar", "progress merged count=${progress.size}")
                         }
                     }
                     // 1) 缓存即时读:不过期检查,进入页面立即显示上次进度
-                    val cached = BangumiApi.cachedSeasonProgress()
+                    val cached =
+                        when (mode) {
+                            BangumiCalendarMode.DRAMA -> BangumiApi.cachedDramaProgress(selectedYear)
+                            else -> BangumiApi.cachedSeasonProgress()
+                        }
                     if (token != requestToken) return@launch
                     mergeProgress(cached)
                     // 2) 后台刷新:不阻塞 UI,完成后 token 未变则更新
                     launch {
                         try {
-                            val fresh = BangumiApi.refreshSeasonProgress()
+                            val fresh =
+                                when (mode) {
+                                    BangumiCalendarMode.DRAMA -> BangumiApi.refreshDramaProgress(selectedYear)
+                                    else -> BangumiApi.refreshSeasonProgress()
+                                }
                             if (token == requestToken) mergeProgress(fresh)
                         } catch (t: Throwable) {
                             if (t is CancellationException) throw t
@@ -326,7 +390,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 restoreFocusIfNeeded()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                AppLog.e("BangumiCalendar", "load failed spec=${spec.label}", t)
+                AppLog.e("BangumiCalendar", "load failed mode=${mode.name}", t)
                 context?.let { AppToast.show(it, "加载失败，可查看 Logcat(标签 BLBL)") }
             } finally {
                 if (token == requestToken) _binding?.swipeRefresh?.isRefreshing = false
@@ -537,7 +601,27 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     companion object {
         // 季度起点:2006 冬(用户确认,更早的季度意义不大)
         private const val QUARTER_START_YEAR = 2006
+        private const val ARG_MODE = "mode"
 
-        fun newInstance(): BangumiCalendarFragment = BangumiCalendarFragment()
+        fun newInstance(mode: BangumiCalendarMode = BangumiCalendarMode.QUARTER_ANIME): BangumiCalendarFragment =
+            BangumiCalendarFragment().apply {
+                arguments = Bundle().apply { putString(ARG_MODE, mode.name) }
+            }
     }
+}
+
+/** 数据浏览模式:季度粒度(动画 TV)或年份粒度(剧场动画/日剧/电影) */
+enum class BangumiCalendarMode(
+    val type: Int,
+    val cat: Int,
+    val granularity: BangumiCalendarMode.Granularity,
+    val withProgress: Boolean,
+) {
+    QUARTER_ANIME(2, 1, Granularity.QUARTER, true),
+    ANIME_MOVIE(2, 3, Granularity.YEAR, false),
+    DRAMA(6, 1, Granularity.YEAR, true),
+    MOVIE(6, 6002, Granularity.YEAR, false),
+    ;
+
+    enum class Granularity { QUARTER, YEAR }
 }

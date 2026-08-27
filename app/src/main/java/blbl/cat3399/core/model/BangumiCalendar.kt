@@ -10,6 +10,8 @@ data class BangumiCalendarDay(
     /** 分组标题(如 "26夏"、"星期一") */
     val weekdayCn: String,
     val items: List<BangumiCalendarItem>,
+    /** 自定义 header 文案(如 "2026 年 12 部"),为空则用默认统计 */
+    val headerTextOverride: String? = null,
 )
 
 data class BangumiCalendarItem(
@@ -29,6 +31,8 @@ data class BangumiCalendarItem(
     val summary: String?,
     /** 流派标签(已按常见番剧分类白名单过滤,最多 2 个) */
     val tags: List<String>,
+    /** 元标签(meta_tags 原始数组,含地区词 日本/欧美/美国/中国/华语/香港/台湾 等,用于地区筛选) */
+    val metaTags: List<String> = emptyList(),
     /** 总话数(eps,Bangumi 无"已播话数"概念) */
     val totalEpisodes: Int?,
     /** 已放送话数(当季由 /v0/episodes 按 airdate 计算,每日刷新;历史季度为 null) */
