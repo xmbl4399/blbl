@@ -181,43 +181,39 @@ object BangumiApi {
     }
 
     /**
-     * 指定年份 + 分类的条目(全年拉取,按热度排序)。
-     * 用于"剧场动画(type=2 cat=3)/日剧(type=6 cat=1)/电影(type=6 cat=6002)"年份页面。
+     * 指定年份 + 月份 + 分类的条目(当月开播,单月独立缓存)。
+     * 用于"剧场动画(type=2 cat=3)/日剧(type=6 cat=1)/电影(type=6 cat=6002)"年份页面
+     * 的**流式按月加载**(从当前月往前逐月追加,首屏只等 1 个月)。
      *
-     * 注意:API 的 year 单参数语义不可靠(实测日剧 2026 仅回 7 部,而逐月求和 305 部),
-     * 因此采用**并集策略**:year 单参数 ∪ 12 个月逐月(year+month,当月开播语义已验证可靠),
-     * 按 id 去重,保证当年条目完整。
-     * 缓存:当年 12h,历史年份 30 天。
+     * ⚠️ 不能带 sort=rank:type=6(三次元)下 rank+month 组合有 API bug(实测只回 1 条),
+     * 动画 type=2 不受影响(季度动画仍用 browseQuarter);这里用默认 date 排序,月内按 rank 重排。
+     * 缓存:12h。
      */
-    suspend fun browseYear(type: Int, cat: Int, year: Int): List<BangumiCalendarItem> {
-        // v2:并集策略(year 单参数 + 逐月)修复数量不全,缓存键加后缀强制重建
-        val cacheName = "browse_${type}_${cat}_${year}_v2.json"
-        val isCurrentYear = Calendar.getInstance().get(Calendar.YEAR) == year
-        val cacheAge = if (isCurrentYear) QUARTER_CACHE_AGE_MS else QUARTER_CACHE_AGE_MS_HISTORY
+    suspend fun browseYearMonth(type: Int, cat: Int, year: Int, month: Int): List<BangumiCalendarItem> {
+        val cacheName = "browse_${type}_${cat}_${year}_${month}.json"
         val cachedRaw = readCache(cacheName)
-        if (cachedRaw != null && cacheAgeMs(cacheName) < cacheAge) {
-            AppLog.i(TAG, "browseYear type=$type cat=$cat $year served from cache")
+        if (cachedRaw != null && cacheAgeMs(cacheName) < QUARTER_CACHE_AGE_MS) {
+            AppLog.i(TAG, "browseYearMonth type=$type cat=$cat $year-$month served from cache")
             return runCatching { withContext(Dispatchers.Default) { parseItems(JSONArray(cachedRaw!!)) } }
-                .getOrElse { fetchYear(type, cat, year, cacheName, fallbackRaw = cachedRaw) }
+                .getOrElse { fetchYearMonth(type, cat, year, month, cacheName, fallbackRaw = cachedRaw) }
         }
-        return fetchYear(type, cat, year, cacheName, fallbackRaw = cachedRaw)
+        return fetchYearMonth(type, cat, year, month, cacheName, fallbackRaw = cachedRaw)
     }
 
-    private suspend fun fetchYear(
+    private suspend fun fetchYearMonth(
         type: Int,
         cat: Int,
         year: Int,
+        month: Int,
         cacheName: String,
         fallbackRaw: String?,
     ): List<BangumiCalendarItem> {
         return try {
             val rawItems = JSONArray()
             val seen = HashSet<Long>()
-
-            // 1) year 单参数(电影等分类可返回全年全集)
             var offset = 0
             while (true) {
-                val url = "$BASE/v0/subjects?type=$type&cat=$cat&year=$year&limit=100&sort=rank&offset=$offset"
+                val url = "$BASE/v0/subjects?type=$type&cat=$cat&year=$year&month=$month&limit=100&offset=$offset"
                 val root = JSONObject(fetch(url))
                 val data = root.optJSONArray("data") ?: JSONArray()
                 for (i in 0 until data.length()) {
@@ -227,28 +223,9 @@ object BangumiApi {
                 }
                 if (data.length() < 100) break
                 offset += 100
-                if (offset > 1000) break
+                if (offset > 500) break
             }
-            // 2) 逐月 1-12 月(year+month 语义可靠,日剧等分类的完整数据来源)
-            // ⚠️ 不能带 sort=rank:type=6(三次元)下 rank+month 组合有 API bug(实测只回 1 条),
-            //    动画 type=2 不受影响;这里用默认 date 排序拿全数据,最后统一按 rank 重排
-            for (month in 1..12) {
-                var mOffset = 0
-                while (true) {
-                    val url = "$BASE/v0/subjects?type=$type&cat=$cat&year=$year&month=$month&limit=100&offset=$mOffset"
-                    val root = JSONObject(fetch(url))
-                    val data = root.optJSONArray("data") ?: JSONArray()
-                    for (i in 0 until data.length()) {
-                        val obj = data.getJSONObject(i)
-                        val id = obj.optLong("id", 0L)
-                        if (seen.add(id)) rawItems.put(obj)
-                    }
-                    if (data.length() < 100) break
-                    mOffset += 100
-                    if (mOffset > 1000) break
-                }
-            }
-            // 合并后按热度(rank)排序:rank 升序在前,无排名(rank=-1)排最后
+            // 月内按热度(rank)排序:rank 升序在前,无排名(rank=-1)排最后
             val sorted = JSONArray().apply {
                 (0 until rawItems.length())
                     .map { rawItems.getJSONObject(it) }
@@ -259,7 +236,7 @@ object BangumiApi {
             withContext(Dispatchers.Default) { parseItems(sorted) }
         } catch (t: Throwable) {
             if (fallbackRaw != null) {
-                AppLog.w(TAG, "browseYear type=$type cat=$cat $year fetch failed, fallback to stale cache", t)
+                AppLog.w(TAG, "browseYearMonth type=$type cat=$cat $year-$month fetch failed, fallback to stale cache", t)
                 return withContext(Dispatchers.Default) { parseItems(JSONArray(fallbackRaw)) }
             }
             throw t
@@ -290,8 +267,12 @@ object BangumiApi {
     fun cachedDramaProgress(year: Int): Map<Long, Int> = cachedProgressFor("drama_$year")
 
     suspend fun refreshDramaProgress(year: Int): Map<Long, Int> {
-        val ids = runCatching { browseYear(6, 1, year).map { it.id } }.getOrDefault(emptyList())
-        return refreshProgressFor("drama_$year", ids)
+        // 逐月合并 ids(与年份页数据源一致)
+        val ids = HashSet<Long>()
+        for (m in 1..12) {
+            runCatching { browseYearMonth(6, 1, year, m) }.getOrNull()?.forEach { ids.add(it.id) }
+        }
+        return refreshProgressFor("drama_$year", ids.toList())
     }
 
     private fun cachedProgressFor(keyPrefix: String): Map<Long, Int> {
