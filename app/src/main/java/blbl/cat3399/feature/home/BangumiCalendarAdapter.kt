@@ -22,8 +22,10 @@ import java.util.Locale
  */
 class BangumiCalendarAdapter(
     private val onClick: (position: Int, item: BangumiCalendarItem) -> Unit,
-    /** 是否显示分集信息(季度动画/日剧 true;剧场动画/电影 false) */
+    /** 是否显示分集信息(仅 TV动画 true;剧场动画/日剧/电影 false) */
     private val showEpisodeText: Boolean = true,
+    /** 是否显示流派 tag(动画 true;日剧/电影 false) */
+    private val showTags: Boolean = true,
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private sealed interface Row {
@@ -77,7 +79,7 @@ class BangumiCalendarAdapter(
         val inflater = LayoutInflater.from(parent.context).cloneInUserScale(parent.context)
         return when (viewType) {
             TYPE_HEADER -> HeaderVh(ItemBangumiCalendarHeaderBinding.inflate(inflater, parent, false))
-            else -> CardVh(ItemBangumiFollowBinding.inflate(inflater, parent, false), showEpisodeText)
+            else -> CardVh(ItemBangumiFollowBinding.inflate(inflater, parent, false), showEpisodeText, showTags)
         }
     }
 
@@ -110,6 +112,7 @@ class BangumiCalendarAdapter(
     class CardVh(
         private val binding: ItemBangumiFollowBinding,
         private val showEpisodeText: Boolean,
+        private val showTags: Boolean,
     ) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: BangumiCalendarItem, onClick: (position: Int, item: BangumiCalendarItem) -> Unit) {
             binding.tvTitle.text = item.searchKeyword
@@ -126,8 +129,8 @@ class BangumiCalendarAdapter(
                 binding.tvAccessBadgeText.visibility = View.GONE
             }
 
-            // 流派标签:左上角,最多 2 个
-            val tags = item.tags
+            // 流派标签:左上角,最多 2 个(日剧/电影不显示)
+            val tags = if (showTags) item.tags else emptyList()
             if (tags.isEmpty()) {
                 binding.llTags.visibility = View.GONE
                 binding.tvTag1.visibility = View.GONE
