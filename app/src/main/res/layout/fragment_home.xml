@@ -13,6 +13,7 @@
         android:layout_marginEnd="12dp"
         android:background="@android:color/transparent"
         android:focusable="false"
+        app:tabMode="scrollable"
         app:layout_constraintEnd_toStartOf="@id/tv_clock"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />

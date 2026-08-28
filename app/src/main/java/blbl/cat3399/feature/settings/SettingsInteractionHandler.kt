@@ -917,9 +917,9 @@ class SettingsInteractionHandler(
 
             SettingId.HideNoScoreMedia -> {
                 prefs.hideNoScoreMedia = !prefs.hideNoScoreMedia
-                // 开关变化都强制清空日剧/电影缓存,保证下次拉取按当前开关过滤
-                BangumiApi.clearSixTypeCache()
-                AppToast.show(activity, "隐藏无评分影视：${if (prefs.hideNoScoreMedia) "开" else "关"}（已清空日剧/电影缓存）")
+                // 开关变化都强制清空全部页面缓存,保证下次拉取按当前开关过滤
+                BangumiApi.clearAllBrowseCache()
+                AppToast.show(activity, "隐藏无评分：${if (prefs.hideNoScoreMedia) "开" else "关"}（已清空全部页面缓存）")
                 renderer.refreshSection(entry.id)
             }
 

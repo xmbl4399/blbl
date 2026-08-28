@@ -112,9 +112,9 @@ class AppPrefs(context: Context) {
         get() = loadStringList(KEY_MAIN_MY_VISIBLE_TABS)
         set(value) = saveStringList(KEY_MAIN_MY_VISIBLE_TABS, normalizeStringList(value))
 
-    /** 隐藏无评分影视(日剧/电影):开启后强制清空其缓存,仅显示有评分的剧集 */
+    /** 隐藏无评分条目(全部页面生效):开启后清空全部页面缓存,仅显示有评分的条目;默认开启 */
     var hideNoScoreMedia: Boolean
-        get() = prefs.getBoolean(KEY_HIDE_NO_SCORE_MEDIA, false)
+        get() = prefs.getBoolean(KEY_HIDE_NO_SCORE_MEDIA, true)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_NO_SCORE_MEDIA, value).apply()
 
     var followingListOrder: String
@@ -1077,15 +1077,19 @@ class AppPrefs(context: Context) {
         private const val KEY_CUSTOM_PAGE_CONFIG = "custom_page_config"
         private const val KEY_MAIN_HOME_VISIBLE_TABS = "main_home_visible_tabs"
 
-        /** 二改默认主页 tab:推荐/热门/季度动画/剧场动画/日剧/电影(源 app 的"番剧/影视"默认隐藏) */
+        /** 二改默认主页 tab:推荐/热门/TV动画/非TV动画/电影/日剧/韩剧/欧美剧/华语剧;
+         * 源 app 的"番剧/影视"默认隐藏(可在设置手动勾回) */
         private val DEFAULT_HOME_VISIBLE_TABS =
             listOf(
                 "recommend",
                 "popular",
                 "bangumi_calendar",
                 "anime_movie",
-                "drama",
                 "movie",
+                "drama",
+                "korean_drama",
+                "western_drama",
+                "chinese_drama",
             )
         private const val KEY_MAIN_CATEGORY_VISIBLE_TABS = "main_category_visible_tabs"
         private const val KEY_MAIN_LIVE_VISIBLE_TABS = "main_live_visible_tabs"

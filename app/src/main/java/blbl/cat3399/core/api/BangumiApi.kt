@@ -35,6 +35,7 @@ object BangumiApi {
     private const val BASE = "https://api.bgm.tv"
     private const val USER_AGENT = "blbl/0.1 (https://github.com/xmbl4399/blbl; bangumi calendar)"
     private const val QUARTER_CACHE_AGE_MS = 12 * 60 * 60 * 1000L
+    private const val QUARTER_CACHE_AGE_MS_HISTORY = 30L * 24 * 60 * 60 * 1000L // 历史年份 30 天(数据固定,省 12 倍请求)
 
     private lateinit var cacheDir: File
 
@@ -55,8 +56,8 @@ object BangumiApi {
     private val client by lazy {
         OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build()
     }
 
@@ -64,15 +65,15 @@ object BangumiApi {
         cacheDir = File(context.cacheDir, "bangumi").apply { mkdirs() }
     }
 
-    /** 清空日剧/电影(type=6)缓存:设置"隐藏无评分影视"开关时调用,强制下次按当前开关重新拉取 */
-    fun clearSixTypeCache() {
+    /** 清空全部 bangumi 浏览缓存:设置"隐藏无评分"开关时调用,强制下次按当前开关重新拉取(对全部页面生效) */
+    fun clearAllBrowseCache() {
         val dir = cacheDir ?: return
         dir.listFiles()?.forEach { f ->
-            if (f.name.startsWith("browse_6_")) {
+            if (f.name.startsWith("browse_")) {
                 runCatching { f.delete() }
             }
         }
-        AppLog.i(TAG, "cleared type=6 browse cache")
+        AppLog.i(TAG, "cleared all browse cache")
     }
 
     /**
@@ -80,7 +81,7 @@ object BangumiApi {
      * 用于年份页面流式加载第一步"先显缓存月"(秒出)。
      */
     fun cachedYearMonth(type: Int, cat: Int, year: Int, month: Int, korean: Boolean = false): List<BangumiCalendarItem>? {
-        val cacheName = "browse_${type}_${cat}_${year}_${month}_v3.json"
+        val cacheName = "browse_${type}_${cat}_${year}_${month}_v5.json"
         val cached = readCache(cacheName) ?: return null
         // 单月缓存 JSON 小(几十 KB),同步解析可接受
         val items = runCatching { parseItems(JSONArray(cached)) }.getOrNull() ?: return null
@@ -89,17 +90,20 @@ object BangumiApi {
 
     /**
      * 指定年份 + 月份 + 分类的条目(当月开播,单月独立缓存)。
-     * 用于 TV动画/剧场动画(type=2)与日剧/电影(type=6)的**年份流式按月加载**。
+     * 用于 TV动画/非TV动画(type=2)与日剧/电影(type=6)的**年份流式按月加载**。
      *
-     * - type=2(动画):带 sort=rank(热度排序,rank+month 无 bug,实测正常)
-     * - type=6(三次元):**不能带 sort=rank**(rank+month 组合有 API bug,实测只回 1 条),
-     *   用默认 date 排序;两种模式最终统一按 rank 重排,缓存内容一致
-     * 缓存:12h。
+     * - 统一不带 sort=rank(rank+month 组合服务端不稳定,cat=3/2 无 rank 条目会截断丢失)
+     * - 最终按 rank 重排:动画按 rank 升序(无 rank 垫底),三次元纯评分降序,缓存内容一致
+     * 缓存:当年 12h / 历史年份 30 天。
      */
-    suspend fun browseYearMonth(type: Int, cat: Int, year: Int, month: Int, korean: Boolean = false): List<BangumiCalendarItem> {
-        val cacheName = "browse_${type}_${cat}_${year}_${month}_v3.json"
+    suspend fun browseYearMonth(type: Int, cat: Int, year: Int, month: Int, korean: Boolean = false, force: Boolean = false): List<BangumiCalendarItem> {
+        val cacheName = "browse_${type}_${cat}_${year}_${month}_v5.json"
+        // 当年 12h 缓存;历史年份 30 天(数据固定)
+        val cacheAge =
+            if (Calendar.getInstance().get(Calendar.YEAR) == year) QUARTER_CACHE_AGE_MS else QUARTER_CACHE_AGE_MS_HISTORY
         val cachedRaw = readCache(cacheName)
-        if (cachedRaw != null && cacheAgeMs(cacheName) < QUARTER_CACHE_AGE_MS) {
+        // force=true(下拉刷新)时跳过新鲜缓存检查,强制重新拉取 bgm
+        if (!force && cachedRaw != null && cacheAgeMs(cacheName) < cacheAge) {
             AppLog.i(TAG, "browseYearMonth type=$type cat=$cat $year-$month served from cache")
             val items =
                 runCatching { withContext(Dispatchers.Default) { parseItems(JSONArray(cachedRaw!!)) } }
@@ -108,6 +112,37 @@ object BangumiApi {
         }
         val fetched = fetchYearMonth(type, cat, year, month, cacheName, fallbackRaw = cachedRaw)
         return if (korean) fetched.filter { it.metaTags.contains("韩国") } else fetched
+    }
+
+    /**
+     * 非TV动画月数据 = cat=5(WEB) ∪ cat=2(OVA) ∪ cat=3(剧场版) 合并去重(评分降序)。
+     * 非电视放送的动画合集:WEB(网络播,现代新番大量在此,实测 2026-07 有 36 部)、
+     * OVA(原创动画录像带/碟片,cat=2 实测为 OVA 分类)、剧场版(电影)。
+     */
+    suspend fun browseAnimeMovieMonth(year: Int, month: Int, force: Boolean = false): List<BangumiCalendarItem> {
+        val web = runCatching { browseYearMonth(2, 5, year, month, force = force) }.getOrDefault(emptyList())
+        val ova = runCatching { browseYearMonth(2, 2, year, month, force = force) }.getOrDefault(emptyList())
+        val movie = runCatching { browseYearMonth(2, 3, year, month, force = force) }.getOrDefault(emptyList())
+        return mergeByScore(mergeByScore(web, ova), movie)
+    }
+
+    /** 非TV动画月数据(纯缓存读,合并三个分类) */
+    fun cachedAnimeMovieMonth(year: Int, month: Int): List<BangumiCalendarItem>? {
+        val web = cachedYearMonth(2, 5, year, month).orEmpty()
+        val ova = cachedYearMonth(2, 2, year, month).orEmpty()
+        val movie = cachedYearMonth(2, 3, year, month).orEmpty()
+        if (web.isEmpty() && ova.isEmpty() && movie.isEmpty()) return null
+        return mergeByScore(mergeByScore(web, ova), movie)
+    }
+
+    /** 合并去重后按评分降序(无评分按日期垫底),与各月页面排序一致 */
+    private fun mergeByScore(a: List<BangumiCalendarItem>, b: List<BangumiCalendarItem>): List<BangumiCalendarItem> {
+        val byId = LinkedHashMap<Long, BangumiCalendarItem>()
+        (a + b).forEach { byId.putIfAbsent(it.id, it) }
+        return byId.values.sortedWith(
+            compareByDescending<BangumiCalendarItem> { it.score ?: -1.0 }
+                .thenBy { it.airDate.orEmpty() },
+        )
     }
 
     private suspend fun fetchYearMonth(
@@ -121,11 +156,12 @@ object BangumiApi {
         return try {
             val rawItems = JSONArray()
             val seen = HashSet<Long>()
-            // type=2 动画可用 rank 排序;type=6 三次元 rank+month 有 bug(只回 1 条),不带 sort
-            val sort = if (type == 2) "&sort=rank" else ""
+            // 不带 sort=rank:rank+month 组合在 bgm 服务端不稳定,实测 2026-08 cat=3(剧场版)
+            // 无 sort 返回 11 条,带 sort=rank 只回 3 条(数据截断)。所有类型统一不带 sort,
+            // 拉全后本地排序(统一评分降序,见下方 sorted 逻辑)。
             var offset = 0
             while (true) {
-                val url = "$BASE/v0/subjects?type=$type&cat=$cat&year=$year&month=$month&limit=100$sort&offset=$offset"
+                val url = "$BASE/v0/subjects?type=$type&cat=$cat&year=$year&month=$month&limit=100&offset=$offset"
                 val root = JSONObject(fetch(url))
                 val data = root.optJSONArray("data") ?: JSONArray()
                 for (i in 0 until data.length()) {
@@ -137,27 +173,23 @@ object BangumiApi {
                 offset += 100
                 if (offset > 500) break
             }
-            // 排序:
-            // - type=2(动画):按 rank(热度排名,77% 条目有排名,语义正确)
-            // - type=6(三次元):纯评分排序(score 降序,接受 1 人评分噪音;无评分按日期垫底)
+            // 排序:所有类型统一按评分降序(score 从高到低;无评分按日期垫底)。
+            // 注:动画原按 rank(热度排名),但 browse 接口不返回 rank 字段(详情接口的 rating.rank 才有),
+            // 且 rank+month 服务端排序不稳定(实测截断),统一评分排序与三次元一致。
             val sorted = JSONArray().apply {
                 val list = (0 until rawItems.length()).map { rawItems.getJSONObject(it) }
                 val ordered =
-                    if (type == 2) {
-                        list.sortedBy { obj -> obj.optInt("rank", Int.MAX_VALUE) }
-                    } else {
-                        list.sortedWith(
-                            compareByDescending<JSONObject> { obj ->
-                                val rating = obj.optJSONObject("rating")
-                                val score = rating?.optDouble("score", 0.0) ?: 0.0
-                                if (score > 0) score else -1.0
-                            }.thenBy { obj -> obj.optString("date").orEmpty() },
-                        )
-                    }
+                    list.sortedWith(
+                        compareByDescending<JSONObject> { obj ->
+                            val rating = obj.optJSONObject("rating")
+                            val score = rating?.optDouble("score", 0.0) ?: 0.0
+                            if (score > 0) score else -1.0
+                        }.thenBy { obj -> obj.optString("date").orEmpty() },
+                    )
                 ordered.forEach { put(it) }
             }
-            // 设置"隐藏无评分影视"开启时,type=6 剔除无评分条目(score<=0),缓存同样只存有评分的
-            if (type == 6 && BiliClient.prefs.hideNoScoreMedia) {
+            // 设置"隐藏无评分"开启时,全部类型剔除无评分条目(score<=0),缓存同样只存有评分的
+            if (BiliClient.prefs.hideNoScoreMedia) {
                 val filtered = JSONArray()
                 for (i in 0 until sorted.length()) {
                     val obj = sorted.getJSONObject(i)

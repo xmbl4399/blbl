@@ -312,7 +312,7 @@ class SettingsRenderer(
                     ),
                     SettingEntry(
                         SettingId.HideNoScoreMedia,
-                        "隐藏无评分影视",
+                        "隐藏无评分条目",
                         if (prefs.hideNoScoreMedia) "开" else "关",
                         null,
                     ),

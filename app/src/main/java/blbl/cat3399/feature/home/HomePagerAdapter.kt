@@ -30,15 +30,16 @@ object HomeTabs {
         listOf(
             HomeTabSpec(KEY_RECOMMEND, R.string.tab_recommend) { VideoGridFragment.newRecommend() },
             HomeTabSpec(KEY_POPULAR, R.string.tab_popular) { VideoGridFragment.newPopular() },
-            HomeTabSpec(KEY_BANGUMI, R.string.tab_bangumi) { PgcRecommendGridFragment.newBangumi() },
-            HomeTabSpec(KEY_CINEMA, R.string.tab_cinema) { PgcRecommendGridFragment.newCinema() },
             HomeTabSpec(KEY_BANGUMI_CALENDAR, R.string.tab_bangumi_calendar) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.QUARTER_ANIME) },
             HomeTabSpec(KEY_ANIME_MOVIE, R.string.tab_anime_movie) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.ANIME_MOVIE) },
-            HomeTabSpec(KEY_DRAMA, R.string.tab_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.DRAMA) },
             HomeTabSpec(KEY_MOVIE, R.string.tab_movie) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.MOVIE) },
+            HomeTabSpec(KEY_DRAMA, R.string.tab_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.DRAMA) },
+            HomeTabSpec(KEY_KOREAN_DRAMA, R.string.tab_korean_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.KOREAN_DRAMA) },
             HomeTabSpec(KEY_WESTERN_DRAMA, R.string.tab_western_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.WESTERN_DRAMA) },
             HomeTabSpec(KEY_CHINESE_DRAMA, R.string.tab_chinese_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.CHINESE_DRAMA) },
-            HomeTabSpec(KEY_KOREAN_DRAMA, R.string.tab_korean_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.KOREAN_DRAMA) },
+            // 源 app 官方页(默认隐藏,可在设置勾回)
+            HomeTabSpec(KEY_BANGUMI, R.string.tab_bangumi) { PgcRecommendGridFragment.newBangumi() },
+            HomeTabSpec(KEY_CINEMA, R.string.tab_cinema) { PgcRecommendGridFragment.newCinema() },
         )
 
     fun visibleTabs(prefs: AppPrefs): List<HomeTabSpec> = filterVisible(all, prefs.mainHomeVisibleTabs)

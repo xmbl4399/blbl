@@ -1,6 +1,7 @@
 package blbl.cat3399.feature.home
 
 import android.os.Bundle
+import androidx.core.view.isVisible
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
@@ -77,10 +78,14 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
             adapter =
                 BangumiCalendarAdapter(
                     onClick = { position, item -> openSearchFor(position, item) },
+                    // 长按复制源标题(原始 name/name_cn,非截断显示标题)
+                    onLongClick = { item -> copySourceTitle(item) },
                     // 集数:仅 TV动画显示(含进度);剧场动画/日剧/电影不显示
                     showEpisodeText = mode == BangumiCalendarMode.QUARTER_ANIME,
                     // tag:仅动画(TV动画/剧场动画)显示;日剧/电影不显示
-                    showTags = mode != BangumiCalendarMode.DRAMA && mode != BangumiCalendarMode.MOVIE,
+                    showTags = mode != BangumiCalendarMode.DRAMA && mode != BangumiCalendarMode.MOVIE &&
+                        mode != BangumiCalendarMode.WESTERN_DRAMA && mode != BangumiCalendarMode.CHINESE_DRAMA &&
+                        mode != BangumiCalendarMode.KOREAN_DRAMA,
                 )
         }
 
@@ -261,8 +266,27 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
 
     private fun loadSeason(isRefresh: Boolean = false) {
         val token = requestToken
-        // 全部模式(TV动画/剧场动画/日剧/电影):年份流式按月加载(从当前月往前逐月追加)
+        // 全部模式(TV动画/非TV动画/日剧/电影):年份流式按月加载(从当前月往前逐月追加)
         loadYearMonths(token, selectedYear, isRefresh)
+    }
+
+    /** 按模式取指定月的缓存数据(纯缓存读):TV动画=纯 cat=1;非TV动画=cat=5∪2∪3 合并 */
+    private fun cachedMonth(month: Int): List<BangumiCalendarItem>? {
+        return when (mode) {
+            BangumiCalendarMode.QUARTER_ANIME -> BangumiApi.cachedYearMonth(2, 1, selectedYear, month)
+            BangumiCalendarMode.ANIME_MOVIE -> BangumiApi.cachedAnimeMovieMonth(selectedYear, month)
+            else -> BangumiApi.cachedYearMonth(mode.type, mode.cat, selectedYear, month, korean = mode.korean)
+        }
+    }
+
+    /** 按模式拉取指定月数据(网络,带缓存):TV动画=纯 cat=1;非TV动画=cat=5∪2∪3 合并。
+     *  force=true(下拉刷新)时跳过新鲜缓存强制重新拉取 bgm。 */
+    private suspend fun fetchMonth(month: Int, force: Boolean = false): List<BangumiCalendarItem>? {
+        return when (mode) {
+            BangumiCalendarMode.QUARTER_ANIME -> runCatching { BangumiApi.browseYearMonth(2, 1, selectedYear, month, force = force) }.getOrNull()
+            BangumiCalendarMode.ANIME_MOVIE -> runCatching { BangumiApi.browseAnimeMovieMonth(selectedYear, month, force = force) }.getOrNull()
+            else -> runCatching { BangumiApi.browseYearMonth(mode.type, mode.cat, selectedYear, month, korean = mode.korean, force = force) }.getOrNull()
+        }
     }
 
     /**
@@ -281,32 +305,51 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 fun submitCurrent() {
                     if (days.isEmpty()) return
                     adapter.submit(ArrayList(days))
-                    // 拿到第一批数据(缓存月或首个网络月)即停刷新转圈,后续月份静默追加
-                    if (token == requestToken) _binding?.swipeRefresh?.isRefreshing = false
+                    // 拿到第一批数据(缓存月或首个网络月)即停刷新转圈,后续月份静默追加;
+                    // 但下拉刷新(isRefresh)时保持转圈,直到全部月份强制重拉完成(见下方统一停止)
+                    if (token == requestToken && !isRefresh) _binding?.swipeRefresh?.isRefreshing = false
                 }
 
                 // 1) 已缓存月先显示(纯缓存读,秒出;不触发网络)
                 for (m in months) {
                     if (token != requestToken) return@launch
-                    val cached = BangumiApi.cachedYearMonth(mode.type, mode.cat, year, m, korean = mode.korean)
+                    val cached = cachedMonth(m)
                     if (cached != null && cached.isNotEmpty()) {
                         days += BangumiCalendarDay(m, "${m}月", cached, "${m}月 · ${cached.size} 部")
                     }
                 }
                 if (days.isNotEmpty()) submitCurrent()
 
-                // 2) 缺失月后台逐月拉取追加(保持月份倒序)
+                // 2) 缺失月后台逐月拉取追加(保持月份倒序);下拉刷新(isRefresh)时全部月份强制重拉,
+                //    但转圈只在"当月(最新月)完整显示"后停止,后续月份静默追加(不拖长转圈)
                 for (m in months) {
                     if (token != requestToken) return@launch
-                    if (days.any { it.weekdayId == m }) continue
-                    val items = runCatching { BangumiApi.browseYearMonth(mode.type, mode.cat, year, m, korean = mode.korean) }.getOrNull() ?: continue
+                    if (!isRefresh && days.any { it.weekdayId == m }) continue
+                    val items = fetchMonth(m, force = isRefresh)
                     if (token != requestToken) return@launch
+                    // 下拉刷新:当月(months.first)数据返回后即视为刷新完成,停转圈
+                    if (isRefresh && m == months.first() && token == requestToken) {
+                        _binding?.swipeRefresh?.isRefreshing = false
+                    }
+                    if (items.isNullOrEmpty()) continue
                     if (items.isNotEmpty()) {
+                        // 刷新时该月可能已有缓存数据,先移除旧行再插入新数据(避免重复)
+                        if (isRefresh) days.removeAll { it.weekdayId == m }
                         val day = BangumiCalendarDay(m, "${m}月", items, "${m}月 · ${items.size} 部")
                         val idx = days.indexOfFirst { it.weekdayId < m }
                         if (idx >= 0) days.add(idx, day) else days.add(day)
                         submitCurrent()
                         AppLog.i("BangumiCalendar", "stream month=$m add=${items.size} total=${days.sumOf { it.items.size }}")
+                    }
+                }
+
+                // 3) 空态提示:整年无任何数据;下拉刷新完成后统一停止转圈
+                if (token == requestToken) {
+                    _binding?.swipeRefresh?.isRefreshing = false
+                    if (days.isEmpty()) {
+                        binding.tvEmpty.isVisible = true
+                    } else {
+                        binding.tvEmpty.isVisible = false
                     }
                 }
 
@@ -358,6 +401,16 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
         // 记录点击卡片位置,搜索页返回时恢复焦点
         if (position != RecyclerView.NO_POSITION) pendingRestorePosition = position
         (activity as? MainActivity)?.navigateToSearch(keyword, returnToBangumi = true)
+    }
+
+    /** 长按复制源标题(原始 name/name_cn,非截断显示标题) */
+    private fun copySourceTitle(item: BangumiCalendarItem) {
+        if (!isAdded) return
+        val text = item.searchKeyword
+        if (text.isEmpty()) return
+        val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("bangumi_title", text))
+        AppToast.show(requireContext(), "已复制：$text")
     }
 
     // ---- 焦点管理(与首页其他 tab 保持一致) ----
@@ -563,7 +616,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     }
 }
 
-/** 数据浏览模式:全部为年份粒度流式加载(TV动画/剧场动画/日剧/电影/欧美剧/华语剧/韩剧) */
+/** 数据浏览模式:全部为年份粒度流式加载(TV动画/非TV动画/日剧/电影/欧美剧/华语剧/韩剧) */
 enum class BangumiCalendarMode(
     val type: Int,
     val cat: Int,
@@ -571,7 +624,9 @@ enum class BangumiCalendarMode(
     /** 韩剧:无官方分类,从 cat=6001(电视剧)中按 meta_tags 含"韩国"过滤 */
     val korean: Boolean = false,
 ) {
+    /** TV动画:纯 cat=1(TV),WEB 已拆出到非TV动画页 */
     QUARTER_ANIME(2, 1, true),
+    /** 非TV动画:cat=5(WEB) ∪ cat=2(OVA) ∪ cat=3(剧场版) 合并(见 BangumiApi.browseAnimeMovieMonth) */
     ANIME_MOVIE(2, 3, false),
     DRAMA(6, 1, false),
     MOVIE(6, 6002, false),

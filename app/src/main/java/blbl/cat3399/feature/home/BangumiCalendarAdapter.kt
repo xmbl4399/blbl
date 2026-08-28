@@ -22,6 +22,8 @@ import java.util.Locale
  */
 class BangumiCalendarAdapter(
     private val onClick: (position: Int, item: BangumiCalendarItem) -> Unit,
+    /** 长按复制源标题回调(item 为原始数据,非截断显示标题) */
+    private val onLongClick: (BangumiCalendarItem) -> Unit = {},
     /** 是否显示分集信息(仅 TV动画 true;剧场动画/日剧/电影 false) */
     private val showEpisodeText: Boolean = true,
     /** 是否显示流派 tag(动画 true;日剧/电影 false) */
@@ -79,7 +81,7 @@ class BangumiCalendarAdapter(
         val inflater = LayoutInflater.from(parent.context).cloneInUserScale(parent.context)
         return when (viewType) {
             TYPE_HEADER -> HeaderVh(ItemBangumiCalendarHeaderBinding.inflate(inflater, parent, false))
-            else -> CardVh(ItemBangumiFollowBinding.inflate(inflater, parent, false), showEpisodeText, showTags)
+            else -> CardVh(ItemBangumiFollowBinding.inflate(inflater, parent, false), showEpisodeText, showTags, onLongClick)
         }
     }
 
@@ -113,9 +115,15 @@ class BangumiCalendarAdapter(
         private val binding: ItemBangumiFollowBinding,
         private val showEpisodeText: Boolean,
         private val showTags: Boolean,
+        private val onLongClick: (BangumiCalendarItem) -> Unit,
     ) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: BangumiCalendarItem, onClick: (position: Int, item: BangumiCalendarItem) -> Unit) {
-            binding.tvTitle.text = item.searchKeyword
+            // 显示标题:name_cn 为空且原名含" - "(主标题-副标题)时只显示主标题,卡片更简洁
+            // (复制/搜索仍用未截断的 searchKeyword 源标题)
+            val displayTitle =
+                if (item.nameCn.isBlank() && item.name.contains(" - ")) item.name.substringBefore(" - ").trim()
+                else item.searchKeyword
+            binding.tvTitle.text = displayTitle
 
             // 评分徽章:右上角;>=7 分金色醒目,<7 分半透明低调
             val score = item.score
@@ -166,6 +174,10 @@ class BangumiCalendarAdapter(
             binding.root.setOnClickListener {
                 val pos = bindingAdapterPosition.takeIf { it != RecyclerView.NO_POSITION } ?: return@setOnClickListener
                 onClick(pos, item)
+            }
+            binding.root.setOnLongClickListener {
+                onLongClick(item)
+                true
             }
         }
     }
