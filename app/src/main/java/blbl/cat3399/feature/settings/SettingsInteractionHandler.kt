@@ -29,6 +29,7 @@ import blbl.cat3399.core.log.LogExporter
 import blbl.cat3399.core.log.LogUploadClient
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppConfigBackup
+import blbl.cat3399.core.api.BangumiApi
 import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.CustomPageConfig
 import blbl.cat3399.core.prefs.CustomPageTabConfig
@@ -912,6 +913,14 @@ class SettingsInteractionHandler(
                     options = MyTabs.all.map { it.key to activity.getString(it.titleRes) },
                     selectedKeys = prefs.mainMyVisibleTabs,
                 ) { prefs.mainMyVisibleTabs = it }
+            }
+
+            SettingId.HideNoScoreMedia -> {
+                prefs.hideNoScoreMedia = !prefs.hideNoScoreMedia
+                // 开关变化都强制清空日剧/电影缓存,保证下次拉取按当前开关过滤
+                BangumiApi.clearSixTypeCache()
+                AppToast.show(activity, "隐藏无评分影视：${if (prefs.hideNoScoreMedia) "开" else "关"}（已清空日剧/电影缓存）")
+                renderer.refreshSection(entry.id)
             }
 
             SettingId.UiScaleFactor -> {

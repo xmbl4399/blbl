@@ -4,6 +4,7 @@ import android.content.Context
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.BangumiCalendarDay
 import blbl.cat3399.core.model.BangumiCalendarItem
+import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.net.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -63,12 +64,23 @@ object BangumiApi {
         cacheDir = File(context.cacheDir, "bangumi").apply { mkdirs() }
     }
 
+    /** 清空日剧/电影(type=6)缓存:设置"隐藏无评分影视"开关时调用,强制下次按当前开关重新拉取 */
+    fun clearSixTypeCache() {
+        val dir = cacheDir ?: return
+        dir.listFiles()?.forEach { f ->
+            if (f.name.startsWith("browse_6_")) {
+                runCatching { f.delete() }
+            }
+        }
+        AppLog.i(TAG, "cleared type=6 browse cache")
+    }
+
     /**
      * 纯缓存读:指定年月的条目(不触发网络,无缓存或已过期也返回缓存值,由调用方决定是否刷新)。
      * 用于年份页面流式加载第一步"先显缓存月"(秒出)。
      */
     fun cachedYearMonth(type: Int, cat: Int, year: Int, month: Int): List<BangumiCalendarItem>? {
-        val cacheName = "browse_${type}_${cat}_${year}_${month}.json"
+        val cacheName = "browse_${type}_${cat}_${year}_${month}_v3.json"
         val cached = readCache(cacheName) ?: return null
         // 单月缓存 JSON 小(几十 KB),同步解析可接受
         return runCatching { parseItems(JSONArray(cached)) }.getOrNull()
@@ -84,7 +96,7 @@ object BangumiApi {
      * 缓存:12h。
      */
     suspend fun browseYearMonth(type: Int, cat: Int, year: Int, month: Int): List<BangumiCalendarItem> {
-        val cacheName = "browse_${type}_${cat}_${year}_${month}.json"
+        val cacheName = "browse_${type}_${cat}_${year}_${month}_v3.json"
         val cachedRaw = readCache(cacheName)
         if (cachedRaw != null && cacheAgeMs(cacheName) < QUARTER_CACHE_AGE_MS) {
             AppLog.i(TAG, "browseYearMonth type=$type cat=$cat $year-$month served from cache")
@@ -123,8 +135,7 @@ object BangumiApi {
             }
             // 排序:
             // - type=2(动画):按 rank(热度排名,77% 条目有排名,语义正确)
-            // - type=6(三次元):rank 缺失率高(日剧仅 4% 有排名)→ 改按评分排序,
-            //   评分人数 >=10 的按 score 降序(避免 1 人评分噪音),其余(无评分/人数少)按日期垫底
+            // - type=6(三次元):纯评分排序(score 降序,接受 1 人评分噪音;无评分按日期垫底)
             val sorted = JSONArray().apply {
                 val list = (0 until rawItems.length()).map { rawItems.getJSONObject(it) }
                 val ordered =
@@ -134,13 +145,23 @@ object BangumiApi {
                         list.sortedWith(
                             compareByDescending<JSONObject> { obj ->
                                 val rating = obj.optJSONObject("rating")
-                                val total = rating?.optInt("total", 0) ?: 0
                                 val score = rating?.optDouble("score", 0.0) ?: 0.0
-                                if (total >= 10 && score > 0) score else -1.0
+                                if (score > 0) score else -1.0
                             }.thenBy { obj -> obj.optString("date").orEmpty() },
                         )
                     }
                 ordered.forEach { put(it) }
+            }
+            // 设置"隐藏无评分影视"开启时,type=6 剔除无评分条目(score<=0),缓存同样只存有评分的
+            if (type == 6 && BiliClient.prefs.hideNoScoreMedia) {
+                val filtered = JSONArray()
+                for (i in 0 until sorted.length()) {
+                    val obj = sorted.getJSONObject(i)
+                    val score = obj.optJSONObject("rating")?.optDouble("score", 0.0) ?: 0.0
+                    if (score > 0) filtered.put(obj)
+                }
+                writeCache(cacheName, filtered.toString())
+                return withContext(Dispatchers.Default) { parseItems(filtered) }
             }
             writeCache(cacheName, sorted.toString())
             withContext(Dispatchers.Default) { parseItems(sorted) }
@@ -151,23 +172,6 @@ object BangumiApi {
             }
             throw t
         }
-    }
-
-    /**
-     * TV动画年份页进度(仅当年有效):已放送话数,缓存键按年隔离。
-     * 先显缓存、后台刷新策略:
-     * - [cachedTvProgress]:同步读缓存,不过期检查,立即返回(无缓存返回空 map)
-     * - [refreshTvProgress]:强制网络拉取 + 写缓存(suspend,约 10s+)
-     */
-    fun cachedTvProgress(year: Int): Map<Long, Int> = cachedProgressFor("tv_$year")
-
-    suspend fun refreshTvProgress(year: Int): Map<Long, Int> {
-        // 逐月合并 ids(与年份页数据源一致)
-        val ids = HashSet<Long>()
-        for (m in 1..12) {
-            runCatching { browseYearMonth(2, 1, year, m) }.getOrNull()?.forEach { ids.add(it.id) }
-        }
-        return refreshProgressFor("tv_$year", ids.toList())
     }
 
     /** 日剧年份页进度(仅当年有效):已放送话数,缓存键按年隔离 */

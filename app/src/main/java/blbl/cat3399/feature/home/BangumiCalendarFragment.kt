@@ -310,24 +310,15 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                     }
                 }
 
-                // 3) 当年进度(仅 TV动画/日剧):先缓存合并,后台刷新
+                // 3) 当年日剧进度(仅日剧;TV动画只显示总话数,不做进度):先缓存合并,后台刷新
                 val needProgress =
-                    (mode == BangumiCalendarMode.QUARTER_ANIME || mode == BangumiCalendarMode.DRAMA) &&
-                        year == Calendar.getInstance().get(Calendar.YEAR)
+                    mode == BangumiCalendarMode.DRAMA && year == Calendar.getInstance().get(Calendar.YEAR)
                 if (needProgress && token == requestToken) {
-                    val cached =
-                        when (mode) {
-                            BangumiCalendarMode.DRAMA -> BangumiApi.cachedDramaProgress(year)
-                            else -> BangumiApi.cachedTvProgress(year)
-                        }
+                    val cached = BangumiApi.cachedDramaProgress(year)
                     if (token == requestToken) mergeProgress(days, cached)
                     launch {
                         try {
-                            val fresh =
-                                when (mode) {
-                                    BangumiCalendarMode.DRAMA -> BangumiApi.refreshDramaProgress(year)
-                                    else -> BangumiApi.refreshTvProgress(year)
-                                }
+                            val fresh = BangumiApi.refreshDramaProgress(year)
                             if (token == requestToken) mergeProgress(days, fresh)
                         } catch (t: Throwable) {
                             if (t is CancellationException) throw t

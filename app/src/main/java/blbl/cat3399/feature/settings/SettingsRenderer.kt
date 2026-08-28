@@ -310,6 +310,12 @@ class SettingsRenderer(
                         SettingsText.mainMyVisibleTabsText(activity, prefs.mainMyVisibleTabs),
                         null,
                     ),
+                    SettingEntry(
+                        SettingId.HideNoScoreMedia,
+                        "隐藏无评分影视",
+                        if (prefs.hideNoScoreMedia) "开" else "关",
+                        null,
+                    ),
                 )
 
             "播放设置" ->

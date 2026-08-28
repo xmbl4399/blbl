@@ -38,6 +38,7 @@ enum class SettingId(
     MainCategoryVisibleTabs("main_category_visible_tabs"),
     MainLiveVisibleTabs("main_live_visible_tabs"),
     MainMyVisibleTabs("main_my_visible_tabs"),
+    HideNoScoreMedia("hide_no_score_media"),
 
     // 播放设置
     PlayerPreferredQn("player_preferred_qn"),

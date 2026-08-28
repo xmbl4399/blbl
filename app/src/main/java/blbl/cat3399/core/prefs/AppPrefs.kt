@@ -112,6 +112,11 @@ class AppPrefs(context: Context) {
         get() = loadStringList(KEY_MAIN_MY_VISIBLE_TABS)
         set(value) = saveStringList(KEY_MAIN_MY_VISIBLE_TABS, normalizeStringList(value))
 
+    /** 隐藏无评分影视(日剧/电影):开启后强制清空其缓存,仅显示有评分的剧集 */
+    var hideNoScoreMedia: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_NO_SCORE_MEDIA, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_NO_SCORE_MEDIA, value).apply()
+
     var followingListOrder: String
         get() {
             val raw = prefs.getString(KEY_FOLLOWING_LIST_ORDER, FOLLOWING_LIST_ORDER_FOLLOW_TIME) ?: FOLLOWING_LIST_ORDER_FOLLOW_TIME
@@ -1085,6 +1090,7 @@ class AppPrefs(context: Context) {
         private const val KEY_MAIN_CATEGORY_VISIBLE_TABS = "main_category_visible_tabs"
         private const val KEY_MAIN_LIVE_VISIBLE_TABS = "main_live_visible_tabs"
         private const val KEY_MAIN_MY_VISIBLE_TABS = "main_my_visible_tabs"
+        private const val KEY_HIDE_NO_SCORE_MEDIA = "hide_no_score_media"
         private const val KEY_FOLLOWING_LIST_ORDER = "following_list_order"
         private const val KEY_DYNAMIC_FOLLOWING_RECENT_UPDATE_DOT_ENABLED = "dynamic_following_recent_update_dot_enabled"
         private const val KEY_AUTO_UPDATE_CHECK_ENABLED = "auto_update_check_enabled"
