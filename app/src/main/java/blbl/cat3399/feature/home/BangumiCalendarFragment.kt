@@ -288,7 +288,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 // 1) 已缓存月先显示(纯缓存读,秒出;不触发网络)
                 for (m in months) {
                     if (token != requestToken) return@launch
-                    val cached = BangumiApi.cachedYearMonth(mode.type, mode.cat, year, m)
+                    val cached = BangumiApi.cachedYearMonth(mode.type, mode.cat, year, m, korean = mode.korean)
                     if (cached != null && cached.isNotEmpty()) {
                         days += BangumiCalendarDay(m, "${m}月", cached, "${m}月 · ${cached.size} 部")
                     }
@@ -299,7 +299,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 for (m in months) {
                     if (token != requestToken) return@launch
                     if (days.any { it.weekdayId == m }) continue
-                    val items = runCatching { BangumiApi.browseYearMonth(mode.type, mode.cat, year, m) }.getOrNull() ?: continue
+                    val items = runCatching { BangumiApi.browseYearMonth(mode.type, mode.cat, year, m, korean = mode.korean) }.getOrNull() ?: continue
                     if (token != requestToken) return@launch
                     if (items.isNotEmpty()) {
                         val day = BangumiCalendarDay(m, "${m}月", items, "${m}月 · ${items.size} 部")
@@ -563,15 +563,20 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
     }
 }
 
-/** 数据浏览模式:全部为年份粒度流式加载(TV动画/剧场动画/日剧/电影) */
+/** 数据浏览模式:全部为年份粒度流式加载(TV动画/剧场动画/日剧/电影/欧美剧/华语剧/韩剧) */
 enum class BangumiCalendarMode(
     val type: Int,
     val cat: Int,
     val withProgress: Boolean,
+    /** 韩剧:无官方分类,从 cat=6001(电视剧)中按 meta_tags 含"韩国"过滤 */
+    val korean: Boolean = false,
 ) {
     QUARTER_ANIME(2, 1, true),
     ANIME_MOVIE(2, 3, false),
-    DRAMA(6, 1, true),
+    DRAMA(6, 1, false),
     MOVIE(6, 6002, false),
+    WESTERN_DRAMA(6, 2, false),
+    CHINESE_DRAMA(6, 3, false),
+    KOREAN_DRAMA(6, 6001, false, korean = true),
     ;
 }

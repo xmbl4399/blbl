@@ -10,6 +10,9 @@
     <string name="tab_anime_movie">MOV动画</string>
     <string name="tab_drama">日剧</string>
     <string name="tab_movie">电影</string>
+    <string name="tab_western_drama">欧美剧</string>
+    <string name="tab_chinese_drama">华语剧</string>
+    <string name="tab_korean_drama">韩剧</string>
     <string name="tab_search">搜索</string>
     <string name="tab_category">分类</string>
     <string name="tab_dynamic">动态</string>

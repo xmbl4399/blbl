@@ -79,11 +79,12 @@ object BangumiApi {
      * 纯缓存读:指定年月的条目(不触发网络,无缓存或已过期也返回缓存值,由调用方决定是否刷新)。
      * 用于年份页面流式加载第一步"先显缓存月"(秒出)。
      */
-    fun cachedYearMonth(type: Int, cat: Int, year: Int, month: Int): List<BangumiCalendarItem>? {
+    fun cachedYearMonth(type: Int, cat: Int, year: Int, month: Int, korean: Boolean = false): List<BangumiCalendarItem>? {
         val cacheName = "browse_${type}_${cat}_${year}_${month}_v3.json"
         val cached = readCache(cacheName) ?: return null
         // 单月缓存 JSON 小(几十 KB),同步解析可接受
-        return runCatching { parseItems(JSONArray(cached)) }.getOrNull()
+        val items = runCatching { parseItems(JSONArray(cached)) }.getOrNull() ?: return null
+        return if (korean) items.filter { it.metaTags.contains("韩国") } else items
     }
 
     /**
@@ -95,15 +96,18 @@ object BangumiApi {
      *   用默认 date 排序;两种模式最终统一按 rank 重排,缓存内容一致
      * 缓存:12h。
      */
-    suspend fun browseYearMonth(type: Int, cat: Int, year: Int, month: Int): List<BangumiCalendarItem> {
+    suspend fun browseYearMonth(type: Int, cat: Int, year: Int, month: Int, korean: Boolean = false): List<BangumiCalendarItem> {
         val cacheName = "browse_${type}_${cat}_${year}_${month}_v3.json"
         val cachedRaw = readCache(cacheName)
         if (cachedRaw != null && cacheAgeMs(cacheName) < QUARTER_CACHE_AGE_MS) {
             AppLog.i(TAG, "browseYearMonth type=$type cat=$cat $year-$month served from cache")
-            return runCatching { withContext(Dispatchers.Default) { parseItems(JSONArray(cachedRaw!!)) } }
-                .getOrElse { fetchYearMonth(type, cat, year, month, cacheName, fallbackRaw = cachedRaw) }
+            val items =
+                runCatching { withContext(Dispatchers.Default) { parseItems(JSONArray(cachedRaw!!)) } }
+                    .getOrElse { fetchYearMonth(type, cat, year, month, cacheName, fallbackRaw = cachedRaw) }
+            return if (korean) items.filter { it.metaTags.contains("韩国") } else items
         }
-        return fetchYearMonth(type, cat, year, month, cacheName, fallbackRaw = cachedRaw)
+        val fetched = fetchYearMonth(type, cat, year, month, cacheName, fallbackRaw = cachedRaw)
+        return if (korean) fetched.filter { it.metaTags.contains("韩国") } else fetched
     }
 
     private suspend fun fetchYearMonth(

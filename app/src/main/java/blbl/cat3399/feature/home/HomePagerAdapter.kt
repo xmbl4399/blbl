@@ -22,6 +22,9 @@ object HomeTabs {
     const val KEY_ANIME_MOVIE = "anime_movie"
     const val KEY_DRAMA = "drama"
     const val KEY_MOVIE = "movie"
+    const val KEY_WESTERN_DRAMA = "western_drama"
+    const val KEY_CHINESE_DRAMA = "chinese_drama"
+    const val KEY_KOREAN_DRAMA = "korean_drama"
 
     val all: List<HomeTabSpec> =
         listOf(
@@ -33,6 +36,9 @@ object HomeTabs {
             HomeTabSpec(KEY_ANIME_MOVIE, R.string.tab_anime_movie) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.ANIME_MOVIE) },
             HomeTabSpec(KEY_DRAMA, R.string.tab_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.DRAMA) },
             HomeTabSpec(KEY_MOVIE, R.string.tab_movie) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.MOVIE) },
+            HomeTabSpec(KEY_WESTERN_DRAMA, R.string.tab_western_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.WESTERN_DRAMA) },
+            HomeTabSpec(KEY_CHINESE_DRAMA, R.string.tab_chinese_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.CHINESE_DRAMA) },
+            HomeTabSpec(KEY_KOREAN_DRAMA, R.string.tab_korean_drama) { BangumiCalendarFragment.newInstance(BangumiCalendarMode.KOREAN_DRAMA) },
         )
 
     fun visibleTabs(prefs: AppPrefs): List<HomeTabSpec> = filterVisible(all, prefs.mainHomeVisibleTabs)
