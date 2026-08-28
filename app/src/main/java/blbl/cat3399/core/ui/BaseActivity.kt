@@ -5,8 +5,13 @@ import android.content.Context
 import android.os.BadParcelableException
 import android.os.Bundle
 import android.os.Build
+import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import blbl.cat3399.core.log.AppLog
+import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.theme.ThemePresets
 
 open class BaseActivity : AppCompatActivity() {
@@ -26,6 +31,30 @@ open class BaseActivity : AppCompatActivity() {
         restoredState = sanitizeSavedInstanceState(savedInstanceState)
         super.onCreate(restoredState)
         createdUiScaleFactor = UiScale.factor(this)
+        // Android 15 起强制 edge-to-edge,setDecorFitsSystemWindows(true) 失效;
+        // 非全屏模式下手动给内容根布局加系统栏 padding,避免状态栏/导航栏覆盖内容
+        applySystemBarInsetsPadding()
+    }
+
+    /**
+     * 系统栏 insets 手动适配:全屏(immersive)时 padding 0;
+     * 非全屏时内容根布局加 状态栏高(上) + 导航栏高(下) padding,等效"App 整体变矮"。
+     * 全屏开关切换时由 [WindowDisplayPolicy.requestApplyInsets] 触发重算。
+     */
+    private fun applySystemBarInsetsPadding() {
+        val window = window ?: return
+        val content = window.findViewById<View>(android.R.id.content) ?: return
+        ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val fullscreen = runCatching { BiliClient.prefs.fullscreenEnabled }.getOrDefault(false)
+            if (fullscreen) {
+                v.setPadding(0, 0, 0, 0)
+            } else {
+                v.setPadding(0, bars.top, 0, bars.bottom)
+            }
+            WindowInsetsCompat.CONSUMED
+        }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
     }
 
     override fun onResume() {
