@@ -174,77 +174,6 @@ object BangumiApi {
         }
     }
 
-    /** 日剧年份页进度(仅当年有效):已放送话数,缓存键按年隔离 */
-    fun cachedDramaProgress(year: Int): Map<Long, Int> = cachedProgressFor("drama_$year")
-
-    suspend fun refreshDramaProgress(year: Int): Map<Long, Int> {
-        // 逐月合并 ids(与年份页数据源一致)
-        val ids = HashSet<Long>()
-        for (m in 1..12) {
-            runCatching { browseYearMonth(6, 1, year, m) }.getOrNull()?.forEach { ids.add(it.id) }
-        }
-        return refreshProgressFor("drama_$year", ids.toList())
-    }
-
-    private fun cachedProgressFor(keyPrefix: String): Map<Long, Int> {
-        val cacheName = "progress_$keyPrefix.json"
-        val cached = readCache(cacheName) ?: return emptyMap()
-        return parseProgressMap(cached)
-    }
-
-    private suspend fun refreshProgressFor(keyPrefix: String, ids: List<Long>): Map<Long, Int> {
-        val cacheName = "progress_$keyPrefix.json"
-        AppLog.i(TAG, "refresh progress $keyPrefix for ${ids.size} subjects")
-        val map = HashMap<Long, Int>(ids.size)
-        // 分批并发,避免瞬时打满接口
-        coroutineScope {
-            for (chunk in ids.chunked(6)) {
-                val results = chunk.map { id -> async { id to runCatching { episodeAiredCount(id) }.getOrDefault(0) } }
-                for (d in results) {
-                    val (id, n) = d.await()
-                    if (n > 0) map[id] = n
-                }
-            }
-        }
-        writeCache(cacheName, serializeProgressMap(map))
-        return map
-    }
-
-    /** 单部番剧已放送话数:airdate <= 今天 */
-    private suspend fun episodeAiredCount(subjectId: Long): Int {
-        val raw = fetch("$BASE/v0/episodes?subject_id=$subjectId&type=0&limit=100")
-        return withContext(Dispatchers.Default) {
-            val root = JSONObject(raw)
-            val arr = root.optJSONArray("data") ?: JSONArray()
-            val today = java.time.LocalDate.now()
-            var count = 0
-            for (i in 0 until arr.length()) {
-                val air = arr.getJSONObject(i).optString("airdate").orEmpty()
-                if (air.isNotBlank()) {
-                    runCatching { if (java.time.LocalDate.parse(air) <= today) count++ }
-                }
-            }
-            count
-        }
-    }
-
-    private fun serializeProgressMap(map: Map<Long, Int>): String {
-        val root = JSONObject()
-        for ((id, n) in map) root.put(id.toString(), n)
-        return root.toString()
-    }
-
-    private fun parseProgressMap(raw: String): Map<Long, Int> {
-        return runCatching {
-            val root = JSONObject(raw)
-            val map = HashMap<Long, Int>(root.length())
-            for (key in root.keys()) {
-                key.toLongOrNull()?.let { id -> map[id] = root.optInt(key, 0) }
-            }
-            map
-        }.getOrDefault(emptyMap())
-    }
-
     private suspend fun fetch(url: String): String {
         val req =
             Request.Builder()
@@ -268,11 +197,23 @@ object BangumiApi {
 
     private fun parseItem(it: JSONObject): BangumiCalendarItem {
         val images = it.optJSONObject("images")
-        // 封面优先 common(400px,约 100-200KB);medium 是 800px 原图(300-500KB)加载慢
+        // 封面按"图片质量"设置选精度变体(缓存存原始 JSON 含全部变体,改设置即时生效):
+        // small -> r/200 / medium -> common(400px,默认) / large -> medium(800px,避免原图过大)
         val cover =
-            images?.optString("common").orEmpty().takeIf { c -> c.isNotBlank() }
-                ?: images?.optString("medium").orEmpty().takeIf { c -> c.isNotBlank() }
-                ?: images?.optString("large").orEmpty().takeIf { c -> c.isNotBlank() }
+            when (runCatching { BiliClient.prefs.imageQuality }.getOrDefault("medium")) {
+                "small" ->
+                    images?.optString("small").orEmpty().takeIf { c -> c.isNotBlank() }
+                        ?: images?.optString("common").orEmpty().takeIf { c -> c.isNotBlank() }
+                        ?: images?.optString("medium").orEmpty().takeIf { c -> c.isNotBlank() }
+                "large" ->
+                    images?.optString("medium").orEmpty().takeIf { c -> c.isNotBlank() }
+                        ?: images?.optString("large").orEmpty().takeIf { c -> c.isNotBlank() }
+                        ?: images?.optString("common").orEmpty().takeIf { c -> c.isNotBlank() }
+                else ->
+                    images?.optString("common").orEmpty().takeIf { c -> c.isNotBlank() }
+                        ?: images?.optString("medium").orEmpty().takeIf { c -> c.isNotBlank() }
+                        ?: images?.optString("large").orEmpty().takeIf { c -> c.isNotBlank() }
+            }
         val rating = it.optJSONObject("rating")
         val scoreRaw = rating?.optDouble("score", Double.NaN)
         val airDate =

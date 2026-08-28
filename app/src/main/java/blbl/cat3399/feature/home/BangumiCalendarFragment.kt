@@ -310,24 +310,7 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                     }
                 }
 
-                // 3) 当年日剧进度(仅日剧;TV动画只显示总话数,不做进度):先缓存合并,后台刷新
-                val needProgress =
-                    mode == BangumiCalendarMode.DRAMA && year == Calendar.getInstance().get(Calendar.YEAR)
-                if (needProgress && token == requestToken) {
-                    val cached = BangumiApi.cachedDramaProgress(year)
-                    if (token == requestToken) mergeProgress(days, cached)
-                    launch {
-                        try {
-                            val fresh = BangumiApi.refreshDramaProgress(year)
-                            if (token == requestToken) mergeProgress(days, fresh)
-                        } catch (t: Throwable) {
-                            if (t is CancellationException) throw t
-                            AppLog.w("BangumiCalendar", "progress refresh failed, keep cached", t)
-                        }
-                    }
-                }
-
-                // 4) 焦点恢复(下拉刷新后聚焦第一卡)
+                // 3) 焦点恢复(下拉刷新后聚焦第一卡)
                 if (token == requestToken) {
                     _binding?.let { b ->
                         b.recycler.postIfAlive(isAlive = { _binding === b && isResumed }) {
@@ -366,22 +349,6 @@ class BangumiCalendarFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTar
                 if (token == requestToken) _binding?.swipeRefresh?.isRefreshing = false
             }
         }
-    }
-
-    /** 把进度 map 合并进当前流式加载的月份列表 */
-    private fun mergeProgress(days: ArrayList<BangumiCalendarDay>, progress: Map<Long, Int>) {
-        if (progress.isEmpty()) return
-        val merged =
-            days.map { day ->
-                val items =
-                    day.items.map { item ->
-                        val aired = progress[item.id]
-                        if (aired != null && aired > 0) item.copy(airedEpisodes = aired) else item
-                    }
-                day.copy(items = items)
-            }
-        adapter.submit(merged)
-        AppLog.i("BangumiCalendar", "progress merged count=${progress.size}")
     }
 
     private fun openSearchFor(position: Int, item: BangumiCalendarItem) {
