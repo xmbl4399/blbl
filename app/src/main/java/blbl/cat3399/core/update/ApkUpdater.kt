@@ -28,7 +28,7 @@ import kotlin.math.roundToInt
 
 object ApkUpdater {
     private const val REPO_OWNER = "xmbl4399"
-    private const val REPO_NAME = "blbl"
+    private const val REPO_NAME = "blbl-Bangumi"
     private const val REPO = "$REPO_OWNER/$REPO_NAME"
     private const val CHANGELOG_URL = "https://raw.githubusercontent.com/$REPO/main/CHANGELOG.md"
 

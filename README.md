@@ -4,7 +4,7 @@
 
 ## 二改说明
 
-本仓库是基于 [cat3399/blbl](https://github.com/cat3399/blbl) **v0.1.29** 的二改版本，Fork 仓库：[github.com/xmbl4399/blbl](https://github.com/xmbl4399/blbl)。
+本仓库是基于 [cat3399/blbl](https://github.com/cat3399/blbl) **v0.1.29** 的二改版本，Fork 仓库：[github.com/xmbl4399/blbl-Bangumi](https://github.com/xmbl4399/blbl-Bangumi)。
 
 以下**全量**列出相对原版 v0.1.29 的所有改动；纯风格/使用习惯类改动标注为「作者偏好」。
 
@@ -51,7 +51,7 @@
 
 | 改动 | 说明 |
 |---|---|
-| 检查更新地址切到本仓库 | CHANGELOG + APK 下载 URL → xmbl4399/blbl——二改版需要走自己的发行渠道（必要） |
+| 检查更新地址切到本仓库 | CHANGELOG + APK 下载 URL → xmbl4399/blbl-Bangumi——二改版需要走自己的发行渠道（必要） |
 | 下载镜像 fallback | 直连失败自动降级 ghproxy.net / gh-proxy.com（国内网络兼容） |
 | 版本号对齐源项目 | 源项目 v0.1.29，二改发 v0.1.29.1（versionCode=1291），迭代号后缀避免版本错乱 |
 
